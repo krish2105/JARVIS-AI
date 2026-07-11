@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from src.brain.local_llm import LocalLLM
 from src.brain.tool_types import Tool
 from src.brain.tools import ConfirmFn, ToolGuard, build_tools
+from src.core.cancellation import CancellationToken
 from src.core.context import prune_messages
 from src.system.config import Config
 
@@ -125,26 +126,40 @@ class JarvisSession:
     messages: list[dict] = field(default_factory=list)
 
 
+INTERRUPTED_REPLY = ""  # a barge-in produces no spoken reply; the new turn takes over
+
+
 def run_turn(
     user_text: str,
     session: JarvisSession,
     cfg: Config,
     confirm_fn: ConfirmFn = default_confirm_fn,
+    cancel: CancellationToken | None = None,
 ) -> str:
     """Sends one user turn through the local tool-calling loop and returns
     Jarvis's final text reply. `session.messages` persists conversation
     history for the lifetime of the process, so multi-turn context works
     within a run; facts meant to survive a restart go through the memory
-    tool instead (see src/brain/memory.py)."""
+    tool instead (see src/brain/memory.py).
+
+    If `cancel` is supplied and fires (a barge-in), the loop stops at the next
+    safe checkpoint and returns INTERRUPTED_REPLY WITHOUT executing any tool
+    that hadn't already run — so a stale, pre-interruption action can never
+    fire after the user has moved on."""
     tools = build_tools(cfg)
     guard = ToolGuard(cfg, confirm_fn)
     llm = LocalLLM.get(select_model(cfg, user_text))
+
+    def cancelled() -> bool:
+        return cancel is not None and cancel.cancelled
 
     if not session.messages:
         session.messages.append({"role": "system", "content": build_system_prompt(tools)})
     session.messages.append({"role": "user", "content": user_text})
 
     for _ in range(MAX_TOOL_ITERATIONS):
+        if cancelled():
+            return INTERRUPTED_REPLY
         session.messages = prune_messages(
             session.messages,
             max_tokens=CONTEXT_TOKEN_BUDGET,
@@ -155,7 +170,13 @@ def run_turn(
 
         call = extract_tool_call(reply)
         if call is None:
-            return reply.strip()
+            return INTERRUPTED_REPLY if cancelled() else reply.strip()
+
+        # Re-check AFTER the model produced a tool call but BEFORE we run it:
+        # this is the critical checkpoint that stops a pending side effect from
+        # firing once the user has interrupted.
+        if cancelled():
+            return INTERRUPTED_REPLY
 
         tool = tools.get(call["name"])
         if tool is None:
@@ -164,6 +185,10 @@ def run_turn(
             allowed, reason = guard.check(tool, call["input"])
             if not allowed:
                 result = f"Denied: {reason}"
+            elif cancelled():
+                # Approval may have taken time; bail rather than execute a
+                # now-stale action.
+                return INTERRUPTED_REPLY
             else:
                 try:
                     result = tool.handler(call["input"])
