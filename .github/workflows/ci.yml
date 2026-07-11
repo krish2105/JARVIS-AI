@@ -48,6 +48,7 @@ jobs:
             tests/test_hud.py \
             tests/test_voice_v2.py \
             tests/test_streaming.py \
+            tests/test_streaming_barge.py \
             tests/test_memory_db.py \
             tests/test_mcp_client.py \
             -q --cov=src --cov-report=term-missing
