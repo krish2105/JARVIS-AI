@@ -147,40 +147,42 @@ first run if missing.
 ```bash
 ./install_daemon.sh
 ```
-Installs and loads **two** LaunchAgents (see the architecture note below
-for why it's two, not one). Reboot (or log out/in). The menu bar icon
-should appear automatically with no manual terminal command, and the wake
-word should work immediately.
+Installs and loads **three** LaunchAgents (see the architecture note below
+for why it's three, not one). Reboot (or log out/in). The menu bar icon and
+the HUD should both appear automatically with no manual terminal command,
+and the wake word should work immediately.
 
 ### Phase 6 — HUD
+Three independent processes make up the full experience — run each in its
+own terminal tab (`source .venv/bin/activate` in each first):
 ```bash
-python -m src.main
+python -m src.main             # HUD window + its WebSocket relay server
+python -m src.pipeline         # voice pipeline (wake word / STT / brain / TTS)
+python -m src.system.menubar   # menu bar icon (optional)
 ```
 A small borderless, always-on-top, transparent HUD appears in the screen
-corner set by `hud.corner` in `config.yaml`, and updates in real time as
-you talk to Jarvis. It's click-through while idle so it never steals focus.
+corner set by `hud.corner` in `config.yaml`. Say "Jarvis" to the terminal
+running `src.pipeline`, and watch the HUD (running in the `src.main`
+terminal) react in real time — idle/listening/thinking/speaking. It's
+click-through while idle so it never steals focus.
 
-For the menu bar icon *at the same time*, run this in a second terminal
-tab (or let `install_daemon.sh` manage both as background daemons instead):
-```bash
-python -m src.system.menubar
-```
-
-> **Why two processes, not one**: rumps (menu bar) and pywebview (HUD
+> **Why three processes, not one**: rumps (menu bar) and pywebview (HUD
 > window) each require macOS's Cocoa main-thread run loop, and AppKit only
-> tolerates one owner of it per process — this isn't a minor quirk, it's
-> fatal. An earlier version of this project tried running rumps in a
-> background thread inside `src.main`, and it crashed the *entire process*
-> (HUD and voice pipeline included) with an uncaught
-> `NSInternalInconsistencyException` the moment the menu bar tried to
-> initialize. `src/system/menubar.py` now runs as its own independent
-> process and never touches the pipeline directly — it just connects to
-> `src.main`'s HUD WebSocket server as a client and mirrors its state, so
-> there's no mic contention between the two. The trade-off: the menu bar's
-> "Pause Jarvis" toggle from earlier versions is gone, since the process
-> that could pause the pipeline (`src.main`) and the process showing the
-> menu bar are no longer the same one. To pause, stop `src.main` itself
-> (Ctrl-C, or `launchctl unload` its LaunchAgent).
+> tolerates one owner of it per process — and opening the microphone for
+> the first time hit that same constraint. Both failures were fatal, not
+> cosmetic: running rumps in a background thread inside a combined
+> `src.main`, and separately running the voice pipeline in that same
+> process, each crashed the *entire process* — HUD included — with an
+> uncaught native exception the instant the mic or the menu bar
+> initialized. So now `src.main` (HUD), `src.pipeline` (microphone), and
+> `src.system.menubar` (menu bar) are three independent processes that
+> never share Cocoa or mic access. They talk to each other only over the
+> HUD's WebSocket server (`src/hud/server.py`): the voice pipeline pushes
+> state updates in as a client (`src/hud/client.py`), the HTML frontend
+> and the menu bar both consume them as clients. The trade-off: the old
+> "Pause Jarvis" menu bar toggle is gone, since the process showing the
+> menu bar no longer owns the pipeline it would be pausing. To pause, stop
+> `src.pipeline` itself (Ctrl-C, or `launchctl unload` its LaunchAgent).
 
 ## Running the full test suite
 
@@ -317,8 +319,8 @@ jarvis/
 ├── config.yaml                .env.example / .env (gitignored)
 ├── memories/                  persisted memory-tool files
 ├── src/
-│   ├── main.py                 entrypoint: voice pipeline + HUD (see menubar note)
-│   ├── pipeline.py             wake → stt → brain → tts → HUD state glue
+│   ├── main.py                 HUD process: window + WebSocket relay server (no mic)
+│   ├── pipeline.py             voice process: wake → stt → brain → tts (no Cocoa)
 │   ├── audio/                  wake_word.py, recorder.py, stt.py, tts.py
 │   ├── brain/
 │   │   ├── agent.py              local tool-calling loop (JarvisSession, run_turn)
@@ -329,8 +331,8 @@ jarvis/
 │   │   ├── web_search.py         free DuckDuckGo search
 │   │   ├── mcp_client.py         minimal stdio MCP client
 │   │   └── browser_tools.py      wraps @playwright/mcp as local tools
-│   ├── hud/                    server.py (WebSocket) + web/ (frontend)
-│   └── system/                 config.py, menubar.py, daemon/*.plist
+│   ├── hud/                    server.py (relay) + client.py (reporter) + web/ (frontend)
+│   └── system/                 config.py, menubar.py (own process), daemon/*.plist
 ├── scripts/chat_cli.py        text-only harness (Phase 1)
 └── tests/                      pytest suite (hardware-independent)
 ```

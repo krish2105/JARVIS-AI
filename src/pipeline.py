@@ -1,6 +1,18 @@
 """Glues wake word -> recorder -> STT -> brain -> TTS into the turn-based
 voice loop, and reports state transitions (idle/listening/thinking/speaking)
-so the menu bar icon and HUD can reflect what Jarvis is doing.
+via a pluggable state_callback so the HUD/menu bar can reflect what Jarvis
+is doing.
+
+Deliberately has zero Cocoa/GUI code: run as `python -m src.pipeline`, this
+is a plain process that only ever touches the microphone, never AppKit.
+Earlier versions ran this inside the same process as the pywebview HUD
+window, and it crashed the whole process the first time it opened the
+mic — macOS's microphone permission/authorization flow appears to have the
+same "must happen on the main thread" constraint that rumps' NSStatusBar
+does, and pywebview's Cocoa run loop already owns that thread. So the mic
+gets its own process, full stop; src/main.py (HUD) and src/system/menubar.py
+(menu bar) are separate GUI processes that receive this process's state
+updates over a WebSocket instead of a direct in-process call.
 """
 
 from __future__ import annotations
@@ -96,4 +108,7 @@ def run_forever(
 
 
 if __name__ == "__main__":
-    run_forever()
+    from src.hud.client import HudStateReporter
+
+    _cfg = load_config()
+    run_forever(cfg=_cfg, state_callback=HudStateReporter(_cfg))

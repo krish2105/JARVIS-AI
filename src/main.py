@@ -1,34 +1,33 @@
-"""Jarvis entrypoint: starts the HUD websocket server, the voice pipeline,
-and the HUD overlay window.
+"""Jarvis's HUD process: the WebSocket relay server plus the HUD overlay
+window. Deliberately contains no microphone/pipeline code whatsoever.
 
-Cocoa note: rumps (menu bar) and pywebview (HUD window) each require a
-Cocoa NSApplication run loop, and AppKit only tolerates one per process,
-owned by the main thread. This isn't just a "may misbehave" caveat —
-instantiating rumps' NSStatusBar off the main thread raises an uncaught
-NSInternalInconsistencyException that kills the *entire process*, HUD and
-voice loop included, not just the menu bar. So this file deliberately does
-NOT start the menu bar app. If you want the menu bar icon too, run it as
-its own separate process in another terminal tab:
+Cocoa note: this process's whole job is owning pywebview's Cocoa
+NSApplication run loop on the main thread. Two other things must NOT run
+inside this same process:
 
-    python -m src.system.menubar
+- The menu bar (rumps also needs to own a Cocoa main-thread run loop, and
+  AppKit only tolerates one owner per process — run
+  `python -m src.system.menubar` as its own separate process instead).
+- The voice pipeline (accessing the microphone for the first time appears
+  to hit the same "must happen on the main thread" constraint that AppKit
+  UI elements do; running it here crashed the entire process the instant
+  it opened the mic — run `python -m src.pipeline` as its own separate
+  process instead).
 
-Properly merging both into one Cocoa run loop would mean building the HUD
-window by hand with PyObjC inside rumps' own NSApplication instead of using
-pywebview's create_window()/start() convenience wrapper — a real rewrite,
-not a quick fix — so for now they run side by side as two processes.
+Both of those other processes talk to this one purely over the HUD
+WebSocket server (src/hud/server.py) — the pipeline pushes state updates
+in as a client (src/hud/client.py), the menu bar and this window's own
+HTML/JS both consume them as clients.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 from pathlib import Path
 
 import webview
 
-from src.brain.memory import seed_default_memories
 from src.hud.server import HudServer
-from src.pipeline import run_forever
 from src.system.config import load_config
 
 WEB_DIR = Path(__file__).resolve().parent / "hud" / "web"
@@ -66,24 +65,21 @@ def _set_click_through(window: webview.Window, click_through: bool) -> None:
 
 
 def start_background_work(window: webview.Window, cfg, hud: HudServer) -> None:
-    seed_default_memories()
     hud.run_in_background_thread()
     _position_window(window, cfg.hud.corner)
-
-    def on_state(state: str, extra: dict) -> None:
-        hud.broadcast_threadsafe(state, extra)
-        _set_click_through(window, click_through=(state == "idle"))
-
-    threading.Thread(
-        target=run_forever, kwargs={"cfg": cfg, "state_callback": on_state}, daemon=True
-    ).start()
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     cfg = load_config()
 
-    hud = HudServer(cfg)
+    window: webview.Window | None = None
+
+    def on_state(payload: dict) -> None:
+        if window is not None:
+            _set_click_through(window, click_through=(payload.get("state") == "idle"))
+
+    hud = HudServer(cfg, on_state=on_state)
 
     window = webview.create_window(
         "Jarvis",

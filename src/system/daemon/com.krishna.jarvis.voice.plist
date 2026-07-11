@@ -2,24 +2,25 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Template — do not load this file directly. Run install_daemon.sh, which
-  substitutes __PYTHON_BIN__, __MAIN_PY__, __WORKING_DIR__, and __LOG_PATH__
-  with real absolute paths for your machine and copies the result to
+  substitutes __PYTHON_BIN__, __WORKING_DIR__, and __LOG_PATH__ with real
+  absolute paths for your machine and copies the result to
   ~/Library/LaunchAgents/.
 
-  This runs src.main: the HUD window + its WebSocket relay server only —
-  no microphone code. See com.krishna.jarvis.voice.plist for the voice
-  pipeline and com.krishna.jarvis.menubar.plist for the menu bar; all
-  three run as separate processes on purpose (see src/main.py's docstring).
+  This runs src.pipeline: the microphone/wake-word/STT/TTS voice loop,
+  with zero Cocoa/GUI code. It reports state to com.krishna.jarvis's HUD
+  server as a plain WebSocket client (src/hud/client.py) rather than
+  sharing a process with it — see src/pipeline.py's docstring for why.
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.krishna.jarvis</string>
+    <string>com.krishna.jarvis.voice</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>__PYTHON_BIN__</string>
-        <string>__MAIN_PY__</string>
+        <string>-m</string>
+        <string>src.pipeline</string>
     </array>
 
     <key>WorkingDirectory</key>
