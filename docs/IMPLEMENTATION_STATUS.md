@@ -44,6 +44,19 @@ benchmark, signing/notarization.
 - [x] P1 CI + ruff + bandit + pip-audit config
 - [x] Voice V2 state machine + cancellation + interruptible TTS (logic)
 - [x] Native menu-bar scaffold + login item + worker supervisor (uncompiled)
+- [x] Streaming generation (chat_stream + on_token, cancel-aware; tool-call JSON never streamed)
+- [x] Structured SQLite memory (provenance/confidence/expiry/FTS, untrusted-source guard, markdown migration, remember/recall tools)
+- [x] MCP client hardening (read timeout, stderr capture, injectable transport, supervised restart, retry-once)
+
+### Streaming — remaining
+- Incremental TTS: speak each sentence as it streams from `on_token` instead of
+  after the full reply. Needs Mac audio verification; the token stream + the
+  interruptible `speak()` are both in place.
+
+### MCP — remaining (needs Python 3.10+)
+- Swap `mcp_client.py` for the official `mcp` SDK (added as the `mcp` optional
+  extra). Could NOT be installed/verified in the 3.9 audit env. The hardened
+  hand-rolled client is the verified interim path.
 
 ## Next actions (in order)
 

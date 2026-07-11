@@ -34,6 +34,10 @@ dev = [
     "bandit",
     "pip-audit",
 ]
+# Official MCP SDK — the intended replacement for the hand-rolled stdio client
+# in src/brain/mcp_client.py. Requires Python 3.10+, so it is an opt-in extra
+# rather than a hard dependency (the project still supports the 3.12 target).
+mcp = ["mcp>=1.0"]
 
 [build-system]
 requires = ["setuptools>=68"]
