@@ -13,9 +13,36 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import logging  # noqa: E402
+
 from src.hud.client import HudStateReporter  # noqa: E402
-from src.hud.server import HudServer  # noqa: E402
+from src.hud.server import (  # noqa: E402
+    HudServer,  # noqa: E402
+    _DropHandshakeRejections,
+    _quiet_handshake_rejections,
+)
 from src.system.config import Config  # noqa: E402
+
+
+def _record(msg: str) -> logging.LogRecord:
+    return logging.LogRecord("websockets.server", logging.ERROR, __file__, 0, msg, None, None)
+
+
+def test_handshake_rejection_records_are_dropped():
+    filt = _DropHandshakeRejections()
+    # The benign Origin-rejection log is dropped...
+    assert filt.filter(_record("opening handshake failed")) is False
+    # ...but a genuine server error still gets through.
+    assert filt.filter(_record("connection handler failed: boom")) is True
+
+
+def test_quiet_filter_is_installed_once():
+    ws_logger = logging.getLogger("websockets.server")
+    ws_logger.filters = [f for f in ws_logger.filters if not isinstance(f, _DropHandshakeRejections)]
+    _quiet_handshake_rejections()
+    _quiet_handshake_rejections()  # idempotent
+    installed = [f for f in ws_logger.filters if isinstance(f, _DropHandshakeRejections)]
+    assert len(installed) == 1
 
 
 class FakeWebSocket:

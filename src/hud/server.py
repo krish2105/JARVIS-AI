@@ -47,6 +47,24 @@ _ALLOWED_ORIGINS = (None, "null", "file://")
 _MAX_MESSAGE_BYTES = 256 * 1024
 
 
+class _DropHandshakeRejections(logging.Filter):
+    """websockets logs every rejected opening handshake at ERROR with a full
+    traceback — including the Origin rejections our allowlist is *supposed* to
+    produce (a web page probing :8765 is turned away, exactly as designed).
+    Those are expected and benign, so we drop them to keep jarvis.log clean.
+    Genuine server errors carry a different message and still get through."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "opening handshake failed" not in record.getMessage()
+
+
+def _quiet_handshake_rejections() -> None:
+    """Attach the drop filter to the websockets server logger, once."""
+    ws_logger = logging.getLogger("websockets.server")
+    if not any(isinstance(f, _DropHandshakeRejections) for f in ws_logger.filters):
+        ws_logger.addFilter(_DropHandshakeRejections())
+
+
 class HudServer:
     def __init__(self, cfg: Config, on_state: Callable[[dict], None] | None = None):
         """on_state, if given, fires (on the server's event-loop thread)
@@ -120,6 +138,7 @@ class HudServer:
 
     async def _serve_forever(self) -> None:
         self._loop = asyncio.get_running_loop()
+        _quiet_handshake_rejections()
         async with websockets.serve(
             self._handler,
             self.host,
