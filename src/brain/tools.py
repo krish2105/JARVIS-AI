@@ -23,6 +23,7 @@ from pathlib import Path
 
 from src.brain.browser_tools import build_browser_tools
 from src.brain.memory import memory_dispatch
+from src.brain.memory_db import MemoryDB
 from src.brain.tool_types import Tool
 from src.brain.web_search import web_search
 from src.system.config import Config
@@ -162,6 +163,31 @@ def _memory(tool_input: dict) -> str:
     return memory_dispatch(tool_input)
 
 
+_memory_db: MemoryDB | None = None
+
+
+def _get_memory_db() -> MemoryDB:
+    global _memory_db
+    if _memory_db is None:
+        _memory_db = MemoryDB()
+    return _memory_db
+
+
+def _remember(tool_input: dict) -> str:
+    content = str(tool_input.get("content", "")).strip()
+    if not content:
+        return "Error: nothing to remember."
+    fact_id = _get_memory_db().remember(content, source="user")
+    return f"Remembered (fact #{fact_id})."
+
+
+def _recall(tool_input: dict) -> str:
+    facts = _get_memory_db().search(str(tool_input.get("query", "")), limit=8)
+    if not facts:
+        return "No matching memories."
+    return "\n".join(f"- {f.content}" for f in facts)
+
+
 def build_tools(cfg: Config) -> dict[str, Tool]:
     allowlist = cfg.resolved_filesystem_allowlist()
 
@@ -215,6 +241,22 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
             description="Search the web and return the top results (title, url, snippet).",
             parameters={"query": "string"},
             handler=_web_search,
+        ),
+        "remember": Tool(
+            name="remember",
+            description=(
+                "Save a durable fact about the user to structured long-term memory "
+                "(survives restarts). Use for stable preferences and facts the user "
+                "asks you to remember."
+            ),
+            parameters={"content": "string, the fact to store"},
+            handler=_remember,
+        ),
+        "recall": Tool(
+            name="recall",
+            description="Search long-term memory for facts about the user.",
+            parameters={"query": "string, what to look up"},
+            handler=_recall,
         ),
     }
 
