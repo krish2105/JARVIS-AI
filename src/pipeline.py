@@ -23,8 +23,10 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.audio.barge_in import BargeInWatcher
 from src.audio.recorder import Recorder
 from src.audio.stt import transcribe
+from src.audio.streaming_speaker import StreamingSpeaker
 from src.audio.tts import speak
 from src.audio.wake_word import WakeWordListener
 from src.brain.agent import JarvisSession, run_turn
@@ -140,45 +142,69 @@ def run_forever(
             logger.warning("illegal transition %s -> %s; forcing", sm.state.value, state.value)
             sm.force(state, reason="forced after illegal transition")
 
+    def make_on_token(speaker: StreamingSpeaker, transcript: str):
+        """Build the streaming sink: on the first token, flip the HUD to
+        SPEAKING; every token feeds the incremental TTS."""
+        fired = {"v": False}
+
+        def on_token(tok: str) -> None:
+            if not fired["v"]:
+                fired["v"] = True
+                go(VoiceState.SPEAKING, transcript=transcript)
+            speaker.feed(tok)
+
+        return on_token
+
     go(VoiceState.INITIALIZING)
     _prewarm(cfg)  # load the heavy models NOW so the first "Hey Jarvis" is fast
     go(VoiceState.IDLE)
     try:
         while True:
             wake.listen_once()
-            sm.start_turn()
             go(VoiceState.WAKE_DETECTED)
-            go(VoiceState.LISTENING)
+            audio = None  # after a barge-in, holds the user's next utterance
+            while True:  # turn chain: a barge-in loops back WITHOUT re-waking
+                sm.start_turn()
+                go(VoiceState.LISTENING)
+                if audio is None:
+                    audio = recorder.record_utterance()
+                go(VoiceState.TRANSCRIBING)
 
-            audio = recorder.record_utterance()
-            go(VoiceState.TRANSCRIBING)
+                transcript = transcribe(audio, cfg.audio.sample_rate)
+                audio = None
+                if not transcript:
+                    logger.info("Empty transcript, returning to idle.")
+                    go(VoiceState.IDLE)
+                    break
 
-            transcript = transcribe(audio, cfg.audio.sample_rate)
-            if not transcript:
-                logger.info("Empty transcript, returning to idle.")
+                cancel = CancellationToken()
+                go(VoiceState.THINKING, transcript=transcript)
+
+                # Barge-in: listen for "Hey Jarvis" while we think + speak.
+                barge = BargeInWatcher(wake, cancel)
+                barge.start()
+                # Incremental TTS: speak sentences as the model streams them.
+                speaker = StreamingSpeaker(cfg.voice, cancel=cancel)
+
+                reply = run_turn(
+                    transcript, session, cfg, confirm_fn=confirm_fn,
+                    cancel=cancel, on_token=make_on_token(speaker, transcript),
+                )
+                speaker.finish()
+                barge.stop()
+                _append_transcript(transcript, reply)
+
+                # A reply that never streamed (e.g. the tool-budget message)
+                # still gets spoken, unless the turn was interrupted.
+                if reply and not cancel.cancelled and not speaker.spoken:
+                    speak(reply, voice=cfg.voice, should_stop=lambda c=cancel: c.cancelled)
+
+                if barge.triggered or cancel.cancelled:
+                    sm.barge_in(source="wake", reason="user interrupted")
+                    continue  # loop: LISTENING again, capture the new command
+
                 go(VoiceState.IDLE)
-                continue
-
-            # One cancellation token per turn. A barge-in watcher (mic active
-            # while thinking/speaking) would call cancel.cancel(); wiring that
-            # concurrent watcher is the remaining Mac-verified step — see
-            # docs/IMPLEMENTATION_STATUS.md. The plumbing below already honors
-            # it: run_turn won't execute a stale tool, and speak() stops audio.
-            cancel = CancellationToken()
-
-            go(VoiceState.THINKING, transcript=transcript)
-            reply = run_turn(transcript, session, cfg, confirm_fn=confirm_fn, cancel=cancel)
-            _append_transcript(transcript, reply)
-
-            if not reply:  # interrupted turn produces no spoken reply
-                go(VoiceState.IDLE)
-                continue
-
-            go(VoiceState.SPEAKING, transcript=transcript, reply=reply)
-            interrupted = speak(reply, voice=cfg.voice, should_stop=lambda c=cancel: c.cancelled)
-            if interrupted:
-                sm.barge_in(source="tts", reason="playback interrupted")
-            go(VoiceState.IDLE)
+                break
     finally:
         wake.close()
 

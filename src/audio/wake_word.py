@@ -69,5 +69,27 @@ class WakeWordListener:
                 if on_frame:
                     on_frame()
 
+    def detect_until(self, stop_event) -> bool:
+        """Listen for the wake word until it is detected (return True) or
+        `stop_event` is set (return False). Used for barge-in: the pipeline
+        runs this on a background thread WHILE Jarvis is thinking/speaking, so
+        saying "Hey Jarvis" again interrupts the current turn.
+
+        Reuses this listener's already-loaded model — no per-turn reload."""
+        with sd.InputStream(
+            samplerate=self.sample_rate,
+            blocksize=self.frame_length,
+            channels=1,
+            dtype="int16",
+        ) as stream:
+            while not stop_event.is_set():
+                pcm, _ = stream.read(self.frame_length)
+                pcm = pcm.reshape(-1)
+                scores = self._model.predict(pcm)
+                if self._matched_score(scores) is not None:
+                    self._model.reset()
+                    return True
+        return False
+
     def close(self) -> None:
         pass  # no persistent OS resource beyond the model object itself
