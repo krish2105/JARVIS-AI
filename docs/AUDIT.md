@@ -45,24 +45,26 @@ has several serious security holes relative to its own stated safety goals.
 | P0-4 | **Settings could disable the safety model.** `save_config` let the UI (or a CSWSH attacker via P0-3) set `filesystem_allowlist: ["/"]` and empty `require_confirmation_for`, defeating filesystem scoping and all confirmations at once. | `hud/api.py`, `system/config.py` | **FIXED** — allowlist validation (no `/`, no `~`, no `.ssh`/`.aws`/Keychains); mandatory confirmations re-added on every write. |
 | P0-5 | **Personal data committed to the repo.** `.gitignore` explicitly force-committed `memories/preferences.md` (real name, student status) and `seed_default_memories()` hardcoded it. | `.gitignore`, `brain/memory.py` | **FIXED** — untracked, seed de-personalized. |
 
-### P1 — major reliability / product gaps (not yet fixed)
+### P1 — major reliability / product gaps
 
-- **Unbounded context.** `session.messages` grows forever; no token budget, no
-  summarization, no history pruning (`brain/agent.py`). Long sessions will OOM or
-  blow the context window.
-- **No barge-in / interruption.** The pipeline is strictly serial
-  (`wake → record → think → speak`); you cannot interrupt Jarvis mid-sentence, and
-  it is deaf while speaking (`src/pipeline.py`). This is the single biggest UX gap
-  vs. a "real Jarvis".
-- **Blocking, non-streaming generation.** `LocalLLM.chat()` returns the whole reply
-  at once (`generate(..., verbose=False)`); no token streaming, no cancellation, so
-  first-audio latency = full generation time.
-- **No model lifecycle management.** Both models can be resident at once
-  (`LocalLLM._cache` never evicts); no unload-before-switch, no low-memory recovery.
-  On a 16 GB Mac, 8B + 14B 4-bit resident will thrash.
-- **Logs/transcripts unredacted & unrotated.** `jarvis.log`, `jarvis_transcript.jsonl`,
-  `jarvis_tool_calls.jsonl` grow without bound and store raw content, including
-  whatever secrets pass through tools (`brain/tools.py`, `pipeline.py`).
+- **Unbounded context.** `session.messages` grew forever. **FIXED** —
+  `core/context.py` token-budgeted pruning (system prompt + recent kept,
+  middle summarized/elided), wired into the agent loop.
+- **No barge-in / interruption.** The pipeline was strictly serial and deaf
+  while speaking. **PARTIALLY FIXED** — `core/state_machine.py` +
+  `core/cancellation.py` + interruptible `tts.speak(should_stop=…)` +
+  cancel checkpoints in `run_turn` (a barged-in turn never runs a stale tool).
+  Remaining: the concurrent mic *watcher* that fires the cancel during
+  speaking — needs Mac audio verification.
+- **Blocking, non-streaming generation.** Still open — `LocalLLM.chat()`
+  returns the whole reply at once. Next: `chat_stream` via
+  `mlx_lm.stream_generate` (see IMPLEMENTATION_STATUS.md).
+- **No model lifecycle management.** **FIXED** — `local_llm.py` now evicts any
+  other model before loading (single-model residency), preventing 8B+14B dual
+  residency.
+- **Logs/transcripts unredacted & unrotated.** **FIXED** —
+  `system/redaction.py` scrubs secrets + `RotatingFileHandler`; applied to the
+  log, tool-call log, and transcript.
 - **Fragile web search.** Regex-scrapes DuckDuckGo HTML; breaks on markup change,
   no citation model, page text fed to the LLM with no prompt-injection isolation
   (`brain/web_search.py`).
