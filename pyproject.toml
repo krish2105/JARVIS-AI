@@ -6,8 +6,10 @@ requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
-    "setuptools", # provides pkg_resources, which webrtcvad imports internally;
-                  # not bundled by pip/venv automatically on newer Python 3.12
+    # webrtcvad imports pkg_resources internally, which recent setuptools
+    # releases have started dropping entirely (83.x no longer ships it).
+    # Pin below that so pkg_resources actually exists in the venv.
+    "setuptools<80",
     "mlx-lm",
     "mlx-whisper",
     "mlx-audio",
