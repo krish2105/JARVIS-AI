@@ -1,4 +1,8 @@
-"""On-device, always-listening wake word detection via Picovoice Porcupine.
+"""On-device, always-listening wake word detection via openWakeWord.
+
+No account, no API key, nothing to sign up for — openWakeWord is fully
+open-source and ships a pretrained "hey jarvis" model out of the box,
+downloaded once from its own model repo (free, no key) and cached locally.
 
 Runs entirely locally — no audio ever leaves the machine at this stage.
 Only the short utterance *after* wake-word detection gets recorded (see
@@ -10,69 +14,60 @@ from __future__ import annotations
 
 from typing import Callable
 
-import pvporcupine
 import sounddevice as sd
 
 from src.system.config import Config
 
-# Stock Porcupine keywords that ship with the SDK and don't require training.
-_STOCK_KEYWORDS = {
-    "jarvis", "computer", "alexa", "americano", "blueberry", "bumblebee",
-    "grapefruit", "grasshopper", "hey google", "hey siri", "ok google",
-    "picovoice", "porcupine", "terminator",
-}
-
-
-def _keyword_args(cfg: Config) -> dict:
-    if cfg.wake_word_model_path:
-        return {"keyword_paths": [cfg.wake_word_model_path]}
-    word = cfg.wake_word.lower()
-    if word not in _STOCK_KEYWORDS:
-        raise ValueError(
-            f"'{word}' is not a stock Porcupine keyword and JARVIS_WAKE_WORD_MODEL_PATH "
-            f"is not set. Either set JARVIS_WAKE_WORD to one of {sorted(_STOCK_KEYWORDS)}, "
-            f"or train a custom 'Jarvis' model at https://console.picovoice.ai/ and point "
-            f"JARVIS_WAKE_WORD_MODEL_PATH at the downloaded .ppn file."
-        )
-    return {"keywords": [word]}
+SAMPLE_RATE = 16000
+FRAME_LENGTH = 1280  # 80ms at 16kHz, openWakeWord's recommended chunk size
 
 
 class WakeWordListener:
     """Blocks on `listen_once()` until the configured wake word is heard."""
 
     def __init__(self, cfg: Config):
-        if not cfg.picovoice_access_key:
-            raise RuntimeError("PICOVOICE_ACCESS_KEY is not set in .env")
+        import openwakeword
+        from openwakeword.model import Model
 
-        self._porcupine = pvporcupine.create(
-            access_key=cfg.picovoice_access_key,
-            sensitivities=[cfg.audio.wake_word_sensitivity],
-            **_keyword_args(cfg),
-        )
+        # Idempotent: no-ops if models are already downloaded/cached.
+        openwakeword.utils.download_models()
 
-    @property
-    def sample_rate(self) -> int:
-        return self._porcupine.sample_rate
+        model_kwargs = {}
+        if cfg.wake_word_model_path:
+            model_kwargs["wakeword_models"] = [cfg.wake_word_model_path]
+        self._model = Model(**model_kwargs)  # no filter -> loads all bundled models
 
-    @property
-    def frame_length(self) -> int:
-        return self._porcupine.frame_length
+        self.wake_word = cfg.wake_word.lower()
+        self.threshold = cfg.audio.wake_word_sensitivity
+        self.sample_rate = SAMPLE_RATE
+        self.frame_length = FRAME_LENGTH
+
+    def _matched_score(self, scores: dict[str, float]) -> float | None:
+        """openWakeWord's model names look like 'hey_jarvis_v0.1'; match
+        loosely on the configured wake word rather than an exact key so we
+        don't hardcode a model filename that might change across releases."""
+        for name, score in scores.items():
+            if self.wake_word in name.lower() and score >= self.threshold:
+                return score
+        return None
 
     def listen_once(self, on_frame: Callable[[], None] | None = None) -> None:
         """Blocks until the wake word is detected once, then returns."""
         with sd.InputStream(
-            samplerate=self._porcupine.sample_rate,
-            blocksize=self._porcupine.frame_length,
+            samplerate=self.sample_rate,
+            blocksize=self.frame_length,
             channels=1,
             dtype="int16",
         ) as stream:
             while True:
-                pcm, _ = stream.read(self._porcupine.frame_length)
+                pcm, _ = stream.read(self.frame_length)
                 pcm = pcm.reshape(-1)
-                if self._porcupine.process(pcm) >= 0:
+                scores = self._model.predict(pcm)
+                if self._matched_score(scores) is not None:
+                    self._model.reset()
                     return
                 if on_frame:
                     on_frame()
 
     def close(self) -> None:
-        self._porcupine.delete()
+        pass  # no persistent OS resource beyond the model object itself

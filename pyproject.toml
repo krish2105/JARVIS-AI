@@ -10,7 +10,7 @@ dependencies = [
     "mlx-whisper",
     "mlx-audio",
     "misaki",
-    "pvporcupine",
+    "openwakeword",
     "sounddevice",
     "webrtcvad",
     "numpy",

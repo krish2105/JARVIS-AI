@@ -59,7 +59,7 @@ fi
 echo "==> Preparing .env..."
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "   Created .env from .env.example — fill in PICOVOICE_ACCESS_KEY."
+  echo "   Created .env from .env.example (no keys required by default)."
 else
   echo "   .env already exists, leaving it alone."
 fi
@@ -68,23 +68,28 @@ mkdir -p memories
 touch memories/.gitkeep
 
 echo "==> Verifying imports..."
-python3 -c "import mlx_whisper, mlx_audio, mlx_lm, pvporcupine; print('   all core imports OK')"
+python3 -c "import mlx_whisper, mlx_audio, mlx_lm, openwakeword; print('   all core imports OK')"
+
+echo "==> Downloading openWakeWord's pretrained models (one-time, free, no account)..."
+python3 -c "import openwakeword; openwakeword.utils.download_models()"
 
 cat <<'EOF'
 
 ==> Setup complete.
 
-No Anthropic API key needed — Jarvis's reasoning runs entirely on a local
-MLX model (see config.yaml). It downloads once from Hugging Face on first
-use (a few GB) and is fully offline after that.
+Zero accounts, zero API keys needed:
+  - Reasoning runs entirely on a local MLX model (see config.yaml). It
+    downloads once from Hugging Face on first use (a few GB) and is fully
+    offline after that.
+  - The wake word uses openWakeWord's pretrained "hey jarvis" model,
+    already downloaded above — no Picovoice account needed.
 
 Next steps:
-  1. Edit .env and set PICOVOICE_ACCESS_KEY (free, from console.picovoice.ai).
-  2. source .venv/bin/activate
-  3. python scripts/chat_cli.py         # Phase 1: text-only sanity check
-                                         # (first run downloads the local model — be patient)
-  4. python -m src.pipeline             # Phase 2: full voice loop
-  5. python -m src.main                 # Phase 6: voice loop + menu bar + HUD
+  1. source .venv/bin/activate
+  2. python scripts/chat_cli.py         # Phase 1: text-only sanity check
+                                         # (first run downloads the local LLM — be patient)
+  3. python -m src.pipeline             # Phase 2: full voice loop
+  4. python -m src.main                 # Phase 6: voice loop + menu bar + HUD
 
 The first time Jarvis records audio, macOS will show a microphone
 permission prompt — you must accept it. If it never appears, add your

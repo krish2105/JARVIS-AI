@@ -53,8 +53,9 @@ class Config:
     require_confirmation_for: list[str] = field(default_factory=list)
     hud: HudConfig = field(default_factory=HudConfig)
 
-    # populated from environment, not config.yaml
-    picovoice_access_key: str | None = None
+    # populated from environment, not config.yaml — optional path to a custom
+    # openWakeWord model file, if you ever train one beyond the bundled
+    # "hey jarvis" model.
     wake_word_model_path: str | None = None
 
     def resolved_filesystem_allowlist(self) -> list[Path]:
@@ -62,8 +63,6 @@ class Config:
 
     def redacted(self) -> dict[str, Any]:
         data = copy.deepcopy(self.__dict__)
-        if data.get("picovoice_access_key"):
-            data["picovoice_access_key"] = "***redacted***"
         data["model"] = vars(self.model)
         data["audio"] = vars(self.audio)
         data["hud"] = vars(self.hud)
@@ -105,7 +104,6 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
             port=hud_raw.get("port", 8765),
             corner=hud_raw.get("corner", "bottom-right"),
         ),
-        picovoice_access_key=os.getenv("PICOVOICE_ACCESS_KEY") or None,
         wake_word_model_path=os.getenv("JARVIS_WAKE_WORD_MODEL_PATH") or None,
     )
     return cfg

@@ -1,5 +1,8 @@
 # Jarvis configuration. Secrets stay in .env — this file is safe to commit.
 
+# Matched against openWakeWord's bundled model names (e.g. "jarvis" matches
+# its pretrained "hey_jarvis" model). No account or key needed — see
+# src/audio/wake_word.py.
 wake_word: jarvis
 
 voice: am_liam # Kokoro voice name. Try af_heart, af_bella, am_adam, bm_george, etc.
@@ -18,7 +21,7 @@ audio:
   sample_rate: 16000
   vad_silence_ms: 700           # how much trailing silence ends a turn
   max_record_seconds: 15
-  wake_word_sensitivity: 0.6
+  wake_word_sensitivity: 0.6    # openWakeWord detection threshold, 0-1
 
 # Directories Jarvis's read_file/write_file/run_shell tools are allowed to
 # touch. Never widen this to the whole home directory or root.

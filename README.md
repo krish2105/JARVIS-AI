@@ -4,16 +4,18 @@ A local, voice-first personal AI assistant for Apple Silicon Macs. Wake word
 → on-device speech-to-text → local reasoning → on-device text-to-speech,
 with a lightweight always-on-top HUD and a menu bar icon.
 
-**This is the fully-local edition: no Anthropic API key, no cloud reasoning
-call, no per-token cost, ever.** Speech-to-text, text-to-speech, *and* the
-reasoning step all run on-device via MLX. The only paid dependency the
-original design called for — the Claude API — has been swapped out for a
-local instruct model running through `mlx-lm`, with a hand-built tool-calling
-loop replacing the Claude Agent SDK. See [Architecture note](#architecture-note-why-no-claude)
-for why, and the trade-offs.
+**This is the fully-local, zero-signup edition: no Anthropic API key, no
+Picovoice account, no cloud reasoning call, no per-token cost, ever.**
+Speech-to-text, text-to-speech, wake word, *and* the reasoning step all run
+on-device. The only paid dependency the original design called for — the
+Claude API — has been swapped for a local instruct model via `mlx-lm` with
+a hand-built tool-calling loop, and the wake word uses openWakeWord (a
+pretrained "hey jarvis" model, no account) instead of Picovoice Porcupine
+(which requires signing up). See [Architecture note](#architecture-note-why-no-claude)
+for the reasoning trade-offs.
 
 ```
-[Mic] → Wake word (Porcupine, on-device)
+[Mic] → Wake word (openWakeWord, on-device, pretrained "hey jarvis" model)
       → Speech-to-text (MLX Whisper, on-device)
       → Local LLM + tool loop (mlx-lm, on-device — no cloud call)
             ├── Memory store (memories/, persists across sessions)
@@ -35,8 +37,9 @@ to validate the acceptance tests below.**
 - macOS Sequoia or later, arm64 native throughout (never Rosetta)
 - Homebrew ([install](https://brew.sh) if you don't have it)
 - Xcode Command Line Tools: `xcode-select --install`
-- A free [Picovoice](https://console.picovoice.ai/) access key (for the wake word)
-- That's it — no Anthropic account, no billing, no other paid service.
+- That's it — no Anthropic account, no Picovoice account, no billing,
+  no signups of any kind. The wake word uses openWakeWord's pretrained
+  "hey jarvis" model, downloaded for free with no account needed.
 
 ## Setup
 
@@ -48,16 +51,16 @@ cd jarvis
 
 `setup.sh` is idempotent — safe to re-run. It installs `portaudio`/`ffmpeg`
 via Homebrew, creates `.venv` (Python 3.12, arm64), installs all Python
-deps (including `mlx-lm` for local reasoning), checks for Node (needed for
-the Playwright MCP browser tool), and copies `.env.example` to `.env` if
-you don't already have one.
+deps (including `mlx-lm` for local reasoning), downloads openWakeWord's
+pretrained models (free, no account), checks for Node (needed for the
+Playwright MCP browser tool), and copies `.env.example` to `.env` if you
+don't already have one — no keys need to be filled in.
 
 Then:
 
 ```bash
-# edit .env: set PICOVOICE_ACCESS_KEY
 source .venv/bin/activate
-python -c "import mlx_whisper, mlx_audio, mlx_lm, pvporcupine"  # should exit 0
+python -c "import mlx_whisper, mlx_audio, mlx_lm, openwakeword"  # should exit 0
 ```
 
 The **first time** Jarvis records audio, macOS shows a native microphone
@@ -98,11 +101,11 @@ here makes a network call after the one-time model download** — this is
 the milestone the original spec calls out as "the point where this stops
 being a plan and starts being Jarvis," now with zero recurring cost.
 
-If `jarvis` isn't in Porcupine's stock keyword list on your account, either
-pick a stock keyword (`computer`, `porcupine`, etc. — see
-`src/audio/wake_word.py` for the full list) via `JARVIS_WAKE_WORD`, or train
-a custom "Jarvis" model at console.picovoice.ai and point
-`JARVIS_WAKE_WORD_MODEL_PATH` at the downloaded `.ppn` file.
+openWakeWord ships six pretrained models (`hey jarvis`, `alexa`, `hey
+mycroft`, `hey rhasspy`, `current weather`, `timers`); `JARVIS_WAKE_WORD`
+just needs to be a substring that matches one of their names (default
+`jarvis` matches the bundled `hey_jarvis` model). If you ever train a
+fully custom model, point `JARVIS_WAKE_WORD_MODEL_PATH` at it instead.
 
 ### Phase 3 — tools
 `src/brain/tools.py` registers: `memory`, `read_file`/`write_file` (scoped
@@ -172,13 +175,13 @@ pytest
 ```
 
 The test suite runs anywhere (it was written and verified in a Linux CI
-sandbox with no MLX/Porcupine/macOS available) by exercising the
-hardware-independent logic directly — the memory tool's file operations,
-the confirmation-gate/filesystem-scoping logic, the tool-calling loop's
-JSON parsing (with a fake local LLM standing in for `mlx-lm`), config
-parsing, and the audio modules' pure logic (sentence splitting, wav
-writing, keyword resolution) against mocked `mlx_whisper`/`mlx_audio`/
-`pvporcupine`/`sounddevice`. It does **not** and cannot verify actual local
+sandbox with no MLX/macOS available) by exercising the hardware-independent
+logic directly — the memory tool's file operations, the confirmation-gate/
+filesystem-scoping logic, the tool-calling loop's JSON parsing (with a fake
+local LLM standing in for `mlx-lm`), config parsing, and the audio modules'
+pure logic (sentence splitting, wav writing, wake-word score matching)
+against mocked `mlx_whisper`/`mlx_audio`/`openwakeword`/`sounddevice`. It
+does **not** and cannot verify actual local
 model quality/tool-calling reliability, transcription accuracy, TTS audio
 quality, wake-word detection from real audio, or launchd/rumps/pywebview
 behavior — those are the phase acceptance tests above, and they require
@@ -234,20 +237,24 @@ unchanged either way.
   listening (`src/audio/wake_word.py`) inspects small rolling frames and
   discards them immediately — nothing is ever continuously streamed
   anywhere, local or cloud.
-- **Secrets**: the Picovoice key lives only in `.env` (gitignored), never
-  hardcoded, never committed. `python -m src.system.config` redacts it
-  when printed.
+- **Secrets**: there are none by default — no API keys required anywhere
+  in this edition. If you set optional overrides in `.env`, it's gitignored
+  and never committed.
 
 ## Troubleshooting
 
 - **No mic permission dialog ever appeared**: add your terminal app
   manually under System Settings → Privacy & Security → Microphone, then
   restart the terminal.
-- **`pvporcupine` fails to import**: confirm arm64 Python —
-  `python3 -c "import platform; print(platform.machine())"` should print
-  `arm64`, not `x86_64`. If it prints `x86_64`, you're running under
-  Rosetta; install an arm64-native Python (e.g. `brew install python@3.12`)
-  and re-run `setup.sh`.
+- **`openwakeword` fails to import, or the model download hangs**: confirm
+  arm64 Python — `python3 -c "import platform; print(platform.machine())"`
+  should print `arm64`, not `x86_64`. If it prints `x86_64`, you're running
+  under Rosetta; install an arm64-native Python (e.g.
+  `brew install python@3.12`) and re-run `setup.sh`. The model download
+  itself needs a network connection the first time only.
+- **Wake word never triggers, or triggers on the wrong word**: try lowering
+  `audio.wake_word_sensitivity` in `config.yaml` (e.g. to `0.4`) if it's not
+  triggering, or raising it (e.g. to `0.8`) if it's too trigger-happy.
 - **First response is very slow / model download seems stuck**: the first
   call downloads the model from Hugging Face (a few GB) — check your
   network connection and be patient. Subsequent runs are fast and fully
@@ -298,9 +305,10 @@ jarvis/
 
 ## Cost
 
-$0 recurring. STT, TTS, and reasoning are all on-device via MLX; Porcupine,
-the memory tool, launchd, rumps, and pywebview are all free for personal
-use. The only network usage is the one-time model downloads on first run.
+$0 recurring, $0 up front. STT, TTS, and reasoning are all on-device via
+MLX; openWakeWord, the memory tool, launchd, rumps, and pywebview are all
+free and open-source with no account needed. The only network usage is the
+one-time model downloads (LLM + wake word) on first run.
 
 ## Stretch goals (not built — see original spec)
 
