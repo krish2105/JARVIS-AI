@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from src.brain.memory import MEMORY_ROOT, MemoryStore
-from src.system.config import load_config, update_config_yaml
+from src.system.config import ConfigValidationError, load_config, update_config_yaml
 
 LOG_DIR = Path.home() / "Library" / "Logs"
 TRANSCRIPT_PATH = LOG_DIR / "jarvis_transcript.jsonl"
@@ -100,7 +100,10 @@ def save_config(params: dict) -> dict:
             node = node.setdefault(part, {})
         node[parts[-1]] = value
 
-    update_config_yaml(nested_patch)
+    try:
+        update_config_yaml(nested_patch)
+    except ConfigValidationError as e:
+        return {"error": str(e)}
     return {"ok": True, "config": load_config().redacted()}
 
 

@@ -19,6 +19,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 ENV_PATH = PROJECT_ROOT / ".env"
 
+# Confirmation gates that must ALWAYS be present. The Settings UI may add to
+# require_confirmation_for but may never drop one of these — doing so would
+# let a settings write (including one reaching the API over the wire) silently
+# disable the confirmation that protects file writes, shell commands, memory
+# deletion, and browser side effects. Enforced by update_config_yaml and by
+# src/hud/api.py's save_config.
+MANDATORY_CONFIRMATIONS = ("delete_file", "run_shell_command", "Write", "browser_action")
+
 
 @dataclass
 class ModelConfig:
@@ -113,6 +121,49 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
     return cfg
 
 
+_SENSITIVE_DIR_NAMES = {".ssh", ".aws", ".gnupg", ".config"}
+_SENSITIVE_SUBPATHS = (Path("Library") / "Keychains",)
+
+
+class ConfigValidationError(ValueError):
+    """Raised when a config patch would weaken a safety boundary."""
+
+
+def _validate_filesystem_allowlist(entries: list) -> None:
+    """Reject an allowlist that would grant the model the whole home
+    directory, the filesystem root, or a sensitive credential directory."""
+    if not isinstance(entries, list):
+        raise ConfigValidationError("filesystem_allowlist must be a list of paths.")
+    home = Path.home().resolve()
+    fs_root = Path("/").resolve()
+    for entry in entries:
+        if not isinstance(entry, str) or not entry.strip():
+            raise ConfigValidationError(f"invalid allowlist entry: {entry!r}")
+        resolved = Path(entry).expanduser().resolve()
+        if resolved == fs_root:
+            raise ConfigValidationError("filesystem_allowlist may not include the filesystem root '/'.")
+        if resolved == home:
+            raise ConfigValidationError("filesystem_allowlist may not include the entire home directory.")
+        if resolved in home.parents:
+            raise ConfigValidationError(f"filesystem_allowlist may not include an ancestor of home: {entry}")
+        if resolved.name in _SENSITIVE_DIR_NAMES or any(
+            (home / sub).resolve() == resolved for sub in _SENSITIVE_SUBPATHS
+        ):
+            raise ConfigValidationError(f"filesystem_allowlist may not include the sensitive path: {entry}")
+
+
+def _enforce_mandatory_confirmations(raw: dict) -> None:
+    """Guarantee the mandatory confirmation gates survive any settings
+    write — re-adding any the patch tried to drop."""
+    current = raw.get("require_confirmation_for") or []
+    if not isinstance(current, list):
+        current = []
+    for key in MANDATORY_CONFIRMATIONS:
+        if key not in current:
+            current.append(key)
+    raw["require_confirmation_for"] = current
+
+
 def _deep_merge(base: dict, patch: dict) -> None:
     for key, value in patch.items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
@@ -135,6 +186,12 @@ def update_config_yaml(patch: dict, config_path: Path = CONFIG_PATH) -> None:
         with open(config_path) as f:
             raw = yaml.safe_load(f) or {}
     _deep_merge(raw, patch)
+
+    # Enforce safety invariants on the merged result before it is persisted.
+    if "filesystem_allowlist" in raw:
+        _validate_filesystem_allowlist(raw["filesystem_allowlist"])
+    _enforce_mandatory_confirmations(raw)
+
     with open(config_path, "w") as f:
         yaml.safe_dump(raw, f, sort_keys=False)
 

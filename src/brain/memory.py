@@ -221,9 +221,10 @@ def seed_default_memories() -> None:
     MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
     prefs = MEMORY_ROOT / "preferences.md"
     if not prefs.exists():
+        # No hardcoded personal identity in repo defaults — Jarvis learns who
+        # the user is at runtime and records it here via the memory tool.
         prefs.write_text(
             "# User preferences\n\n"
-            "- User is Krishna, MAIB student, prefers concise direct answers.\n"
-            "- Wake word: jarvis\n"
-            "- Preferred TTS voice: am_liam\n"
+            "- (Jarvis will record your preferences here as it learns them.)\n"
+            "- Prefers concise, direct answers.\n"
         )

