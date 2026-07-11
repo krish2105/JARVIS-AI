@@ -24,11 +24,11 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.brain.browser_tools import _is_readonly  # noqa: E402
-from src.hud.server import HudServer  # noqa: E402
-from src.system.config import Config  # noqa: E402
 from src.brain.tools import _SHELL_ALLOWED_EXECUTABLES, _run_shell  # noqa: E402
+from src.hud.server import HudServer  # noqa: E402
 from src.system.config import (  # noqa: E402
     MANDATORY_CONFIRMATIONS,
+    Config,  # noqa: E402
     ConfigValidationError,
     _validate_filesystem_allowlist,
     update_config_yaml,

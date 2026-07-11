@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  hardware-independent:
+    # These jobs run the checks that DON'T need Apple-Silicon MLX, audio
+    # hardware, or a microphone. The voice/STT/TTS/wake-word/MLX tests are
+    # intentionally NOT run here — they require real hardware and are covered
+    # by the manual macOS acceptance checklist (docs/MAC_ACCEPTANCE.md), not CI.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test-only dependencies
+        # Deliberately NOT `pip install .` — the full deps (mlx, sounddevice,
+        # webrtcvad, openwakeword) don't install on Linux CI. We install just
+        # what the hardware-independent tests need.
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov ruff bandit pip-audit pyyaml python-dotenv websockets requests
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Security scan (bandit)
+        run: bandit -c pyproject.toml -r src -q
+
+      - name: Unit tests (hardware-independent)
+        run: |
+          pytest \
+            tests/test_p1_hardening.py \
+            tests/test_security_hardening.py \
+            tests/test_agent_tools.py \
+            tests/test_config_writer.py \
+            tests/test_hud_api.py \
+            tests/test_hud.py \
+            -q --cov=src --cov-report=term-missing
+
+      - name: Dependency audit (advisory)
+        run: pip-audit || true

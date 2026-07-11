@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 from src.audio.recorder import Recorder
 from src.audio.stt import transcribe
@@ -30,6 +30,7 @@ from src.audio.wake_word import WakeWordListener
 from src.brain.agent import JarvisSession, run_turn
 from src.brain.memory import seed_default_memories
 from src.system.config import Config, load_config
+from src.system.redaction import redact_secrets, rotating_handler
 
 LOG_DIR = Path.home() / "Library" / "Logs"
 LOG_PATH = LOG_DIR / "jarvis.log"
@@ -41,11 +42,10 @@ StateCallback = Callable[[str, dict], None]
 
 
 def _configure_logging() -> None:
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.FileHandler(LOG_PATH), logging.StreamHandler()],
+        handlers=[rotating_handler(LOG_PATH), logging.StreamHandler()],
     )
 
 
@@ -56,8 +56,8 @@ def _append_transcript(transcript: str, reply: str) -> None:
     TRANSCRIPT_PATH.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "transcript": transcript,
-        "reply": reply,
+        "transcript": redact_secrets(transcript),
+        "reply": redact_secrets(reply),
     }
     with open(TRANSCRIPT_PATH, "a") as f:
         f.write(json.dumps(entry) + "\n")

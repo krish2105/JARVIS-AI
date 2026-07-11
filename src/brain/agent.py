@@ -15,9 +15,15 @@ from dataclasses import dataclass, field
 from src.brain.local_llm import LocalLLM
 from src.brain.tool_types import Tool
 from src.brain.tools import ConfirmFn, ToolGuard, build_tools
+from src.core.context import prune_messages
 from src.system.config import Config
 
 MAX_TOOL_ITERATIONS = 6
+# Keep the running conversation bounded so a long-lived daemon can't grow
+# session.messages until it OOMs or overflows the model's context window
+# (which would silently drop the system prompt — and its safety rules).
+CONTEXT_TOKEN_BUDGET = 6000
+CONTEXT_KEEP_RECENT = 8
 
 _HEAVY_HINTS = re.compile(
     r"\b(plan|architect|multi-step|step by step|refactor|design a|"
@@ -139,6 +145,11 @@ def run_turn(
     session.messages.append({"role": "user", "content": user_text})
 
     for _ in range(MAX_TOOL_ITERATIONS):
+        session.messages = prune_messages(
+            session.messages,
+            max_tokens=CONTEXT_TOKEN_BUDGET,
+            keep_recent=CONTEXT_KEEP_RECENT,
+        )
         reply = llm.chat(session.messages)
         session.messages.append({"role": "assistant", "content": reply})
 

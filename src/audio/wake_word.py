@@ -12,7 +12,7 @@ of mic audio and discards them immediately.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import sounddevice as sd
 

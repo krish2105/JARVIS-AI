@@ -17,15 +17,16 @@ import logging
 import os
 import shlex
 import subprocess
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 from src.brain.browser_tools import build_browser_tools
 from src.brain.memory import memory_dispatch
 from src.brain.tool_types import Tool
 from src.brain.web_search import web_search
 from src.system.config import Config
+from src.system.redaction import redact_secrets, rotating_handler
 
 ConfirmFn = Callable[[str, str, dict], bool]  # (description, tool_name, input) -> confirmed?
 
@@ -38,11 +39,11 @@ _logger = logging.getLogger("jarvis.tools")
 def _ensure_logging() -> None:
     if _logger.handlers:
         return
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    handler = logging.FileHandler(LOG_PATH)
+    handler = rotating_handler(LOG_PATH)  # redacts + rotates
     handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
     _logger.addHandler(handler)
     _logger.setLevel(logging.INFO)
+    _logger.propagate = False
 
 
 def _path_in_allowlist(path_str: str, allowlist: list[Path]) -> bool:
@@ -221,6 +222,15 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
     return tools
 
 
+def _redact_input(tool_input: dict) -> dict:
+    """Redact secrets from each string value of a tool input, per-value so a
+    regex can never consume a JSON delimiter and corrupt the record."""
+    redacted: dict = {}
+    for key, value in tool_input.items():
+        redacted[key] = redact_secrets(value) if isinstance(value, str) else value
+    return redacted
+
+
 class ToolGuard:
     """Confirmation gate + audit log, applied by src/brain/agent.py's tool
     loop before/after every tool call."""
@@ -266,8 +276,8 @@ class ToolGuard:
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "tool": tool_name,
-            "input": tool_input,
-            "result": str(result)[:500],
+            "input": _redact_input(tool_input),
+            "result": redact_secrets(str(result))[:500],
         }
         with open(TOOL_CALLS_PATH, "a") as f:
             f.write(json.dumps(entry, default=str) + "\n")

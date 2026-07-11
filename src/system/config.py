@@ -98,7 +98,10 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
         wake_word=os.getenv("JARVIS_WAKE_WORD", raw.get("wake_word", "jarvis")),
         voice=raw.get("voice", "am_liam"),
         model=ModelConfig(
-            local=os.getenv("JARVIS_LOCAL_MODEL", model_raw.get("local", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit")),
+            local=os.getenv(
+                "JARVIS_LOCAL_MODEL",
+                model_raw.get("local", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"),
+            ),
             local_heavy=os.getenv(
                 "JARVIS_LOCAL_HEAVY_MODEL",
                 model_raw.get("local_heavy", "mlx-community/Qwen2.5-14B-Instruct-4bit"),
