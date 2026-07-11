@@ -17,7 +17,9 @@ updates over a WebSocket instead of a direct in-process call.
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -29,7 +31,9 @@ from src.brain.agent import JarvisSession, run_turn
 from src.brain.memory import seed_default_memories
 from src.system.config import Config, load_config
 
-LOG_PATH = Path.home() / "Library" / "Logs" / "jarvis.log"
+LOG_DIR = Path.home() / "Library" / "Logs"
+LOG_PATH = LOG_DIR / "jarvis.log"
+TRANSCRIPT_PATH = LOG_DIR / "jarvis_transcript.jsonl"
 
 logger = logging.getLogger("jarvis")
 
@@ -43,6 +47,20 @@ def _configure_logging() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
         handlers=[logging.FileHandler(LOG_PATH), logging.StreamHandler()],
     )
+
+
+def _append_transcript(transcript: str, reply: str) -> None:
+    """Persists each completed turn so the React app's conversation-history
+    view survives process restarts — src/pipeline.py's in-memory
+    JarvisSession does not."""
+    TRANSCRIPT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "transcript": transcript,
+        "reply": reply,
+    }
+    with open(TRANSCRIPT_PATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
 class VoiceConfirm:
@@ -99,6 +117,7 @@ def run_forever(
 
             emit("thinking", transcript=transcript)
             reply = run_turn(transcript, session, cfg, confirm_fn=confirm_fn)
+            _append_transcript(transcript, reply)
 
             emit("speaking", transcript=transcript, reply=reply)
             speak(reply, voice=cfg.voice)

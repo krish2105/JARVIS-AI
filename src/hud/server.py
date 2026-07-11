@@ -1,16 +1,22 @@
-"""WebSocket server that relays pipeline state transitions:
-{"state": "idle"|"listening"|"thinking"|"speaking", "transcript": "...",
-"reply": "..."} on every change.
+"""WebSocket server with two jobs, multiplexed on one connection:
 
-This runs inside src/main.py (the HUD/GUI process) and acts as a small
-pub-sub hub: any connected client that sends a JSON message gets it
-rebroadcast to every other connected client. The voice pipeline (a
-separate process — see src/pipeline.py and src/hud/client.py) pushes state
-updates in as a plain WebSocket client; the HTML frontend and the menu bar
-app (src/system/menubar.py) are both consumer-only clients that never send
-anything. Splitting the mic-owning pipeline into its own process, with zero
-Cocoa/GUI code in it, is deliberate — see src/main.py's module docstring
-for why sharing a process with pywebview crashed it.
+1. Pub-sub relay: any connected client that sends a message without a
+   "type" of "request" gets it rebroadcast to every other connected
+   client — e.g. {"state": "listening"} from the voice pipeline process
+   (src/pipeline.py, src/hud/client.py) reaches the React frontend and
+   the menu bar app (src/system/menubar.py), both consumer-only clients
+   that never send state themselves.
+2. Request/response API: a client sends {"type": "request", "id": ...,
+   "action": "...", "params": {...}}; the server answers only that
+   client with {"type": "response", "id": ..., "result": {...}}, backed
+   by the handlers in src/hud/api.py. This is how the React app reads/
+   writes config.yaml, memories/, and the transcript/tool-call logs —
+   all of which this process (src/main.py) already has filesystem access
+   to, with no need to route through the mic-owning pipeline process.
+
+Splitting the mic-owning pipeline into its own process, with zero Cocoa/
+GUI code in it, is deliberate — see src/main.py's module docstring for why
+sharing a process with pywebview crashed it.
 """
 
 from __future__ import annotations
@@ -51,11 +57,32 @@ class HudServer:
                     payload = json.loads(message)
                 except json.JSONDecodeError:
                     continue
-                await self._broadcast(payload)
+                if payload.get("type") == "request":
+                    await self._handle_request(websocket, payload)
+                else:
+                    await self._broadcast(payload)
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
             self._clients.discard(websocket)
+
+    async def _handle_request(self, websocket, payload: dict) -> None:
+        from src.hud import api  # local import: keeps api.py's own imports
+
+        action = payload.get("action")
+        handler = api.HANDLERS.get(action)
+        if handler is None:
+            result = {"error": f"unknown action '{action}'"}
+        else:
+            try:
+                result = handler(payload.get("params", {}) or {})
+            except Exception as e:  # noqa: BLE001 - a bad request must not kill the connection
+                result = {"error": str(e)}
+        response = {"type": "response", "id": payload.get("id"), "result": result}
+        try:
+            await websocket.send(json.dumps(response))
+        except websockets.exceptions.ConnectionClosed:
+            pass
 
     async def _broadcast(self, payload: dict) -> None:
         self._latest = payload

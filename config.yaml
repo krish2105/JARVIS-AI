@@ -43,4 +43,3 @@ require_confirmation_for:
 hud:
   host: 127.0.0.1
   port: 8765
-  corner: bottom-right # top-left | top-right | bottom-left | bottom-right

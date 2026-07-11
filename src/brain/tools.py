@@ -12,8 +12,10 @@ executes, and `ToolGuard.log()` after.
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -25,7 +27,9 @@ from src.system.config import Config
 
 ConfirmFn = Callable[[str, str, dict], bool]  # (description, tool_name, input) -> confirmed?
 
-LOG_PATH = Path.home() / "Library" / "Logs" / "jarvis.log"
+LOG_DIR = Path.home() / "Library" / "Logs"
+LOG_PATH = LOG_DIR / "jarvis.log"
+TOOL_CALLS_PATH = LOG_DIR / "jarvis_tool_calls.jsonl"
 _logger = logging.getLogger("jarvis.tools")
 
 
@@ -192,3 +196,13 @@ class ToolGuard:
 
     def log(self, tool_name: str, tool_input: dict, result: str) -> None:
         _logger.info("TOOL_CALL tool=%s input=%s result=%s", tool_name, tool_input, str(result)[:500])
+
+        TOOL_CALLS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "tool": tool_name,
+            "input": tool_input,
+            "result": str(result)[:500],
+        }
+        with open(TOOL_CALLS_PATH, "a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")

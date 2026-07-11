@@ -85,3 +85,44 @@ def test_reporter_call_merges_extra_fields():
     reporter("speaking", {"transcript": "hi", "reply": "hello there"})
     payload = reporter._queue.get(timeout=1)
     assert payload == {"state": "speaking", "transcript": "hi", "reply": "hello there"}
+
+
+def test_handler_dispatches_request_to_api_handler(monkeypatch):
+    import src.hud.api as api
+
+    monkeypatch.setitem(api.HANDLERS, "fake_action", lambda params: {"echo": params})
+    server = HudServer(Config())
+    ws = FakeWebSocket([json.dumps({"type": "request", "id": "1", "action": "fake_action", "params": {"x": 1}})])
+
+    asyncio.run(server._handler(ws))
+
+    response = json.loads(ws.sent[-1])
+    assert response == {"type": "response", "id": "1", "result": {"echo": {"x": 1}}}
+    # requests must never leak into the broadcast state
+    assert server._latest == {"state": "idle", "transcript": "", "reply": ""}
+
+
+def test_handler_request_unknown_action_returns_error():
+    server = HudServer(Config())
+    ws = FakeWebSocket([json.dumps({"type": "request", "id": "1", "action": "nope"})])
+
+    asyncio.run(server._handler(ws))
+
+    response = json.loads(ws.sent[-1])
+    assert "error" in response["result"]
+
+
+def test_handler_request_handler_exception_is_caught(monkeypatch):
+    import src.hud.api as api
+
+    def boom(_params):
+        raise ValueError("kaboom")
+
+    monkeypatch.setitem(api.HANDLERS, "boom", boom)
+    server = HudServer(Config())
+    ws = FakeWebSocket([json.dumps({"type": "request", "id": "1", "action": "boom"})])
+
+    asyncio.run(server._handler(ws))
+
+    response = json.loads(ws.sent[-1])
+    assert response["result"] == {"error": "kaboom"}

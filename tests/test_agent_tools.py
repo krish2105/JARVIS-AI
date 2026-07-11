@@ -153,6 +153,25 @@ def test_guard_memory_view_never_gated():
     assert allowed is True
 
 
+def test_guard_log_writes_structured_jsonl_entry(tmp_path, monkeypatch):
+    import json
+
+    import src.brain.tools as tools_module
+
+    calls_path = tmp_path / "tool_calls.jsonl"
+    monkeypatch.setattr(tools_module, "TOOL_CALLS_PATH", calls_path)
+    monkeypatch.setattr(tools_module, "LOG_PATH", tmp_path / "jarvis.log")
+    guard = ToolGuard(Config(), confirm_fn=lambda *a: True)
+
+    guard.log("web_search", {"query": "weather"}, "sunny today")
+
+    entry = json.loads(calls_path.read_text().splitlines()[0])
+    assert entry["tool"] == "web_search"
+    assert entry["input"] == {"query": "weather"}
+    assert entry["result"] == "sunny today"
+    assert "timestamp" in entry
+
+
 # --- local tool-calling loop JSON parsing ---------------------------------
 
 from src.brain.agent import extract_tool_call, run_turn, JarvisSession  # noqa: E402

@@ -152,19 +152,44 @@ for why it's three, not one). Reboot (or log out/in). The menu bar icon and
 the HUD should both appear automatically with no manual terminal command,
 and the wake word should work immediately.
 
-### Phase 6 — HUD
+### Phase 6 — the app UI
 Three independent processes make up the full experience — run each in its
 own terminal tab (`source .venv/bin/activate` in each first):
 ```bash
-python -m src.main             # HUD window + its WebSocket relay server
+python -m src.main             # app window + its WebSocket relay server
 python -m src.pipeline         # voice pipeline (wake word / STT / brain / TTS)
 python -m src.system.menubar   # menu bar icon (optional)
 ```
-A small borderless, always-on-top, transparent HUD appears in the screen
-corner set by `hud.corner` in `config.yaml`. Say "Jarvis" to the terminal
-running `src.pipeline`, and watch the HUD (running in the `src.main`
-terminal) react in real time — idle/listening/thinking/speaking. It's
-click-through while idle so it never steals focus.
+This opens a normal, resizable window (not a tiny corner overlay — see the
+design note below) with five tabs:
+
+- **Status** — the animated ring from the original HUD design, reflecting
+  idle/listening/thinking/speaking in real time as you talk to Jarvis in
+  the `src.pipeline` terminal.
+- **History** — every completed conversation turn, persisted to
+  `~/Library/Logs/jarvis_transcript.jsonl` so it survives restarts.
+- **Memory** — browse, read, and delete files in `memories/` without
+  touching the filesystem directly.
+- **Activity** — every tool call Jarvis actually executed, read from
+  `~/Library/Logs/jarvis_tool_calls.jsonl`. This is the same "check before
+  trusting a claim" ground truth as the log file, just in the UI.
+- **Settings** — edit `config.yaml` (wake word, voice, models, filesystem
+  allowlist, confirmation requirements) from a form instead of by hand.
+
+The frontend is a real React app (`src/hud/web/frontend/`), built with Vite
+and committed pre-built to `src/hud/web/dist/` — running Jarvis never
+requires Node.js or npm. If you modify the frontend source, rebuild with:
+```bash
+cd src/hud/web/frontend
+npm install
+npm run build
+```
+
+> **Design trade-off**: the original spec called for a tiny, always-on-top,
+> click-through corner widget. That's fundamentally incompatible with a
+> Settings panel or a scrollable history list — you can't click a tab if
+> clicks pass through the window. Building out the fuller UI meant giving
+> up the minimal-ambient-widget behavior in favor of a normal app window.
 
 > **Why three processes, not one**: rumps (menu bar) and pywebview (HUD
 > window) each require macOS's Cocoa main-thread run loop, and AppKit only
@@ -178,8 +203,10 @@ click-through while idle so it never steals focus.
 > `src.system.menubar` (menu bar) are three independent processes that
 > never share Cocoa or mic access. They talk to each other only over the
 > HUD's WebSocket server (`src/hud/server.py`): the voice pipeline pushes
-> state updates in as a client (`src/hud/client.py`), the HTML frontend
-> and the menu bar both consume them as clients. The trade-off: the old
+> state updates in as a client (`src/hud/client.py`), the React app and
+> the menu bar both consume them as clients — the React app additionally
+> uses the same connection as a request/response API (`src/hud/api.py`)
+> for its History/Memory/Settings/Activity tabs. The trade-off: the old
 > "Pause Jarvis" menu bar toggle is gone, since the process showing the
 > menu bar no longer owns the pipeline it would be pausing. To pause, stop
 > `src.pipeline` itself (Ctrl-C, or `launchctl unload` its LaunchAgent).
@@ -331,7 +358,13 @@ jarvis/
 │   │   ├── web_search.py         free DuckDuckGo search
 │   │   ├── mcp_client.py         minimal stdio MCP client
 │   │   └── browser_tools.py      wraps @playwright/mcp as local tools
-│   ├── hud/                    server.py (relay) + client.py (reporter) + web/ (frontend)
+│   ├── hud/
+│   │   ├── server.py              WebSocket relay + request/response dispatch
+│   │   ├── client.py              HudStateReporter (pipeline → HUD state pusher)
+│   │   ├── api.py                 backend handlers: memory/transcript/tool-calls/config
+│   │   └── web/
+│   │       ├── frontend/            React app source (Vite)
+│   │       └── dist/                built output — this is what src.main actually loads
 │   └── system/                 config.py, menubar.py (own process), daemon/*.plist
 ├── scripts/chat_cli.py        text-only harness (Phase 1)
 └── tests/                      pytest suite (hardware-independent)

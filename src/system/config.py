@@ -46,7 +46,6 @@ class AudioConfig:
 class HudConfig:
     host: str = "127.0.0.1"
     port: int = 8765
-    corner: str = "bottom-right"
 
 
 @dataclass
@@ -108,11 +107,36 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
         hud=HudConfig(
             host=hud_raw.get("host", "127.0.0.1"),
             port=hud_raw.get("port", 8765),
-            corner=hud_raw.get("corner", "bottom-right"),
         ),
         wake_word_model_path=os.getenv("JARVIS_WAKE_WORD_MODEL_PATH") or None,
     )
     return cfg
+
+
+def _deep_merge(base: dict, patch: dict) -> None:
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+
+
+def update_config_yaml(patch: dict, config_path: Path = CONFIG_PATH) -> None:
+    """Merges `patch` into config.yaml and writes it back. Used by the
+    Settings view in the HUD app (src/hud/api.py).
+
+    Known limitation: this rewrites the whole file via yaml.safe_dump,
+    which does not preserve the comments in the original config.yaml.
+    Acceptable trade-off for a user-editable settings file; a
+    comment-preserving rewrite would need ruamel.yaml instead of PyYAML.
+    """
+    raw: dict = {}
+    if config_path.exists():
+        with open(config_path) as f:
+            raw = yaml.safe_load(f) or {}
+    _deep_merge(raw, patch)
+    with open(config_path, "w") as f:
+        yaml.safe_dump(raw, f, sort_keys=False)
 
 
 if __name__ == "__main__":
