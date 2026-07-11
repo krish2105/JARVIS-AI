@@ -119,6 +119,12 @@ def run_forever(
     seed_default_memories()
 
     wake = WakeWordListener(cfg)
+    # A SEPARATE wake model for barge-in. openWakeWord's model is not
+    # thread-safe: the barge-in watcher runs on a background thread during a
+    # turn, so it must not share `wake`'s model with the main listen loop —
+    # sharing corrupts the model's rolling buffers and the wake word silently
+    # stops firing after the first turn.
+    barge_wake = WakeWordListener(cfg)
     recorder = Recorder(cfg)
     session = JarvisSession()
     confirm_fn = VoiceConfirm(cfg, recorder)
@@ -180,8 +186,9 @@ def run_forever(
                 cancel = CancellationToken()
                 go(VoiceState.THINKING, transcript=transcript)
 
-                # Barge-in: listen for "Hey Jarvis" while we think + speak.
-                barge = BargeInWatcher(wake, cancel)
+                # Barge-in: listen for "Hey Jarvis" while we think + speak,
+                # on its OWN model (never the main listen loop's).
+                barge = BargeInWatcher(barge_wake, cancel)
                 barge.start()
                 # Incremental TTS: speak sentences as the model streams them.
                 speaker = StreamingSpeaker(cfg.voice, cancel=cancel)
@@ -207,6 +214,7 @@ def run_forever(
                 break
     finally:
         wake.close()
+        barge_wake.close()
 
 
 if __name__ == "__main__":
