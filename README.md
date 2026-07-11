@@ -1,17 +1,23 @@
 # Jarvis
 
 A local, voice-first personal AI assistant for Apple Silicon Macs. Wake word
-→ on-device speech-to-text → Claude (reasoning + tools + memory) → on-device
-text-to-speech, with a lightweight always-on-top HUD and a menu bar icon.
-Speech-to-text and text-to-speech run entirely on-device via MLX; the only
-recurring cost is Claude API tokens for the reasoning step.
+→ on-device speech-to-text → local reasoning → on-device text-to-speech,
+with a lightweight always-on-top HUD and a menu bar icon.
+
+**This is the fully-local edition: no Anthropic API key, no cloud reasoning
+call, no per-token cost, ever.** Speech-to-text, text-to-speech, *and* the
+reasoning step all run on-device via MLX. The only paid dependency the
+original design called for — the Claude API — has been swapped out for a
+local instruct model running through `mlx-lm`, with a hand-built tool-calling
+loop replacing the Claude Agent SDK. See [Architecture note](#architecture-note-why-no-claude)
+for why, and the trade-offs.
 
 ```
 [Mic] → Wake word (Porcupine, on-device)
       → Speech-to-text (MLX Whisper, on-device)
-      → Claude Agent SDK (reasoning + tool loop + memory)
+      → Local LLM + tool loop (mlx-lm, on-device — no cloud call)
             ├── Memory store (memories/, persists across sessions)
-            └── Tools via MCP (web search, filesystem, Gmail/Drive, code exec, browser)
+            └── Local tools (memory, files, web search, shell, browser control)
       → Text-to-speech (MLX/Kokoro, on-device)
       → [Speaker] + HUD (idle / listening / thinking / speaking)
 ```
@@ -29,8 +35,8 @@ to validate the acceptance tests below.**
 - macOS Sequoia or later, arm64 native throughout (never Rosetta)
 - Homebrew ([install](https://brew.sh) if you don't have it)
 - Xcode Command Line Tools: `xcode-select --install`
-- An [Anthropic API key](https://console.anthropic.com/settings/keys)
-- A free [Picovoice](https://console.picovoice.ai/) access key
+- A free [Picovoice](https://console.picovoice.ai/) access key (for the wake word)
+- That's it — no Anthropic account, no billing, no other paid service.
 
 ## Setup
 
@@ -42,15 +48,16 @@ cd jarvis
 
 `setup.sh` is idempotent — safe to re-run. It installs `portaudio`/`ffmpeg`
 via Homebrew, creates `.venv` (Python 3.12, arm64), installs all Python
-deps, checks for Node (needed for the Playwright MCP browser tool), and
-copies `.env.example` to `.env` if you don't already have one.
+deps (including `mlx-lm` for local reasoning), checks for Node (needed for
+the Playwright MCP browser tool), and copies `.env.example` to `.env` if
+you don't already have one.
 
 Then:
 
 ```bash
-# edit .env: set ANTHROPIC_API_KEY and PICOVOICE_ACCESS_KEY
+# edit .env: set PICOVOICE_ACCESS_KEY
 source .venv/bin/activate
-python -c "import mlx_whisper, mlx_audio, pvporcupine, claude_agent_sdk"  # should print nothing / exit 0
+python -c "import mlx_whisper, mlx_audio, mlx_lm, pvporcupine"  # should exit 0
 ```
 
 The **first time** Jarvis records audio, macOS shows a native microphone
@@ -58,6 +65,11 @@ permission dialog — accept it. Don't try to pre-grant this programmatically.
 If the dialog never appears, add your terminal app manually under
 **System Settings → Privacy & Security → Microphone**, then restart the
 terminal.
+
+The **first time** Jarvis actually thinks (any Phase 1+ test below), it
+downloads the local model from Hugging Face — a few GB, one-time, needs a
+network connection. After that it's cached under `~/.cache/huggingface`
+and every subsequent run is fully offline.
 
 ## Build phases & how to verify each one
 
@@ -70,21 +82,21 @@ python -m src.system.config   # prints merged config.yaml + .env, secrets redact
 ```bash
 python scripts/chat_cli.py
 ```
-Have a multi-turn conversation. Ask it to search the web or read a file in
-the project folder. Ask a follow-up that depends on something you said two
-turns ago — session continuity is handled by resuming the Claude Agent
-SDK's session id between turns (`src/brain/agent.py`).
+Have a multi-turn conversation. Ask it to search the web, read a file in the
+project folder, or run a shell command. Ask a follow-up that depends on
+something you said two turns ago — conversation history is kept in memory
+for the lifetime of the process (`src/brain/agent.py`'s `JarvisSession`).
 
-### Phase 2 — voice loop (turn-based, fully local STT/TTS)
+### Phase 2 — voice loop (turn-based, fully local STT/TTS/reasoning)
 ```bash
 python -m src.pipeline
 ```
 Say "Jarvis" (or whatever `JARVIS_WAKE_WORD` is set to) from across the
 room, ask a question, and listen for a spoken reply. Watch stdout for
-`[idle] → [listening] → [thinking] → [speaking]` transitions. No STT/TTS
-network calls happen — only the Claude API call in the "thinking" stage.
-**This is the milestone the original spec calls out as "the point where
-this stops being a plan and starts being Jarvis."**
+`[idle] → [listening] → [thinking] → [speaking]` transitions. **Nothing
+here makes a network call after the one-time model download** — this is
+the milestone the original spec calls out as "the point where this stops
+being a plan and starts being Jarvis," now with zero recurring cost.
 
 If `jarvis` isn't in Porcupine's stock keyword list on your account, either
 pick a stock keyword (`computer`, `porcupine`, etc. — see
@@ -92,25 +104,26 @@ pick a stock keyword (`computer`, `porcupine`, etc. — see
 a custom "Jarvis" model at console.picovoice.ai and point
 `JARVIS_WAKE_WORD_MODEL_PATH` at the downloaded `.ppn` file.
 
-### Phase 3 — real tools via MCP
-Filesystem (scoped to `filesystem_allowlist` in `config.yaml`), web search,
-and Bash are wired in `src/brain/tools_config.py`. Gmail/Drive and browser
-control need one extra step:
+### Phase 3 — tools
+`src/brain/tools.py` registers: `memory`, `read_file`/`write_file` (scoped
+to `filesystem_allowlist` in `config.yaml`), `run_shell`, and `web_search`
+(free — scrapes DuckDuckGo's HTML endpoint, no API key). Browser control
+(`@playwright/mcp`) is discovered dynamically over a minimal MCP stdio
+client (`src/brain/mcp_client.py`) if Node is installed; it degrades
+silently to "unavailable" otherwise.
 
-- **Gmail / Google Drive**: these reuse your existing Claude account
-  connectors rather than a fresh OAuth app. In your Claude account, go to
-  Settings → Connectors → Gmail / Google Drive, and get that connector's
-  remote MCP server URL + an OAuth token. Put them in `.env` as
-  `GMAIL_MCP_URL` / `GMAIL_MCP_TOKEN` / `GDRIVE_MCP_URL` / `GDRIVE_MCP_TOKEN`.
-  Leave blank to skip — Jarvis just won't register those tools.
-- **Browser control**: `@playwright/mcp` runs via `npx` automatically, no
-  extra setup beyond having Node installed (setup.sh checks for this).
+Try: "search the web for the weather in Boston" (runs without asking) vs.
+"write a file called test.txt in Documents saying hello" (should speak/print
+the exact action and wait for you to say "confirm" — see the confirmation
+gate below).
 
-Try: "search my Drive for the RetailPulse report and summarize it" (should
-run without asking) vs. "draft an email to myself saying test" (should
-speak/print the exact action and wait for you to say "confirm" — see the
-confirmation gate below). Drafting always defaults to draft-only; Jarvis
-never auto-sends.
+> **Known gap vs. the original spec**: Gmail/Google Drive integration is
+> not implemented in this local-LLM edition. The original design reused
+> Claude Agent SDK's native MCP client to wire in your account's Gmail/Drive
+> connectors; without that SDK, wiring the same connectors would mean
+> building a full HTTP+SSE JSON-RPC MCP client with OAuth handling from
+> scratch, which wasn't done here. If you want it, the cleanest path is
+> adding a proper MCP HTTP client alongside `mcp_client.py`'s stdio one.
 
 ### Phase 4 — memory
 ```bash
@@ -123,7 +136,9 @@ python scripts/chat_cli.py
 Facts persist in `memories/` (see `src/brain/memory.py`, which implements
 Anthropic's memory tool file operations — `view`/`create`/`str_replace`/
 `insert`/`delete`/`rename` — against that directory, with path-traversal
-protection). `memories/preferences.md` is seeded on first run if missing.
+protection; the command set is Anthropic's design, but it's just plain
+Python now, no Claude dependency). `memories/preferences.md` is seeded on
+first run if missing.
 
 ### Phase 5 — menu bar + background daemon
 ```bash
@@ -159,37 +174,69 @@ pytest
 The test suite runs anywhere (it was written and verified in a Linux CI
 sandbox with no MLX/Porcupine/macOS available) by exercising the
 hardware-independent logic directly — the memory tool's file operations,
-the confirmation-gate/filesystem-scoping logic, config parsing, and the
-audio modules' pure logic (sentence splitting, wav writing, keyword
-resolution) against mocked `mlx_whisper`/`mlx_audio`/`pvporcupine`/
-`sounddevice`. It does **not** and cannot verify actual transcription
-accuracy, TTS audio quality, wake-word detection from real audio, or
-launchd/rumps/pywebview behavior — those are the phase acceptance tests
-above, and they require your actual Mac.
+the confirmation-gate/filesystem-scoping logic, the tool-calling loop's
+JSON parsing (with a fake local LLM standing in for `mlx-lm`), config
+parsing, and the audio modules' pure logic (sentence splitting, wav
+writing, keyword resolution) against mocked `mlx_whisper`/`mlx_audio`/
+`pvporcupine`/`sounddevice`. It does **not** and cannot verify actual local
+model quality/tool-calling reliability, transcription accuracy, TTS audio
+quality, wake-word detection from real audio, or launchd/rumps/pywebview
+behavior — those are the phase acceptance tests above, and they require
+your actual Mac.
+
+## Architecture note: why no Claude?
+
+The original design for this project used Claude (via the Claude Agent
+SDK) as the reasoning brain, with STT/TTS local and only the reasoning step
+hitting the API — a very cheap setup, but not literally $0. This edition
+was built after an explicit request for zero ongoing cost, which means the
+brain had to move on-device too. The trade-offs that come with that:
+
+- **Tool-calling reliability is weaker.** Claude models are trained
+  specifically for reliable structured tool use. Small local models
+  (3B–8B) are instructed to emit a JSON tool-call object via prompt
+  engineering (`src/brain/agent.py`), which works but is less robust —
+  expect occasional malformed JSON or a model that just answers in prose
+  when it should have called a tool. `local_heavy` (8B) is noticeably
+  more reliable at this than `local` (3B); the trade-off is latency.
+- **Reasoning quality is weaker**, especially for multi-step plans, math,
+  and anything requiring broad world knowledge. Straightforward Q&A,
+  reminders, and simple tool calls work fine.
+- **Gmail/Drive integration was dropped** (see the Phase 3 note above) —
+  it depended on the Claude Agent SDK's built-in MCP client for your
+  account's connectors.
+- **Web search is a free DuckDuckGo HTML scrape**, not an official API —
+  it can break if DuckDuckGo changes their markup, in which case swap in
+  any free-tier search API in `src/brain/web_search.py`.
+
+If you'd rather have Claude's reasoning quality and are fine with the
+(small, usage-based) API cost, the swap back is mostly confined to
+`src/brain/agent.py`, `src/brain/tools.py`, and `config.yaml`'s `model:`
+section — the audio pipeline, HUD, memory tool, and safety gates are
+unchanged either way.
 
 ## Safety rules (enforced in code, not just documented)
 
 - **Confirmation gate**: any tool call matching `require_confirmation_for`
-  in `config.yaml` (`send_email`, `delete_file`, `run_shell_command`,
-  `Write`, `Edit`) is intercepted by a `PreToolUse` hook
-  (`src/brain/tools_config.py`) that speaks/prints the exact pending action
-  and denies it unless you explicitly say/type "confirm". This runs via
-  Claude Agent SDK hooks rather than `allowed_tools`/`can_use_tool`,
-  because hooks are the only mechanism that fires for *every* tool call
-  regardless of permission mode.
-- **Filesystem scoping**: `Read`/`Write`/`Edit` are denied outside the
+  in `config.yaml` (`delete_file`, `run_shell_command`, `Write`) is
+  intercepted by `ToolGuard.check()` (`src/brain/tools.py`), called by the
+  tool loop before every execution, which speaks/prints the exact pending
+  action and denies it unless you explicitly say/type "confirm".
+- **Filesystem scoping**: `read_file`/`write_file` are denied outside the
   directories listed in `filesystem_allowlist` (default: `~/Documents`,
   `~/Desktop`, the project folder) — never widen this to the whole home
-  directory or root.
+  directory or root. This check is baked directly into the tool
+  implementations, so the model has no other path to the filesystem.
 - **Audit log**: every tool call's name, arguments, and result is logged to
-  `~/Library/Logs/jarvis.log` via a `PostToolUse` hook.
+  `~/Library/Logs/jarvis.log` via `ToolGuard.log()`.
 - **Mic discipline**: the mic is only actively recording between wake-word
   detection and end-of-turn silence (`src/audio/recorder.py`); wake-word
   listening (`src/audio/wake_word.py`) inspects small rolling frames and
   discards them immediately — nothing is ever continuously streamed
   anywhere, local or cloud.
-- **Secrets**: API keys live only in `.env` (gitignored), never hardcoded,
-  never committed. `python -m src.system.config` redacts them when printed.
+- **Secrets**: the Picovoice key lives only in `.env` (gitignored), never
+  hardcoded, never committed. `python -m src.system.config` redacts it
+  when printed.
 
 ## Troubleshooting
 
@@ -201,10 +248,19 @@ above, and they require your actual Mac.
   `arm64`, not `x86_64`. If it prints `x86_64`, you're running under
   Rosetta; install an arm64-native Python (e.g. `brew install python@3.12`)
   and re-run `setup.sh`.
+- **First response is very slow / model download seems stuck**: the first
+  call downloads the model from Hugging Face (a few GB) — check your
+  network connection and be patient. Subsequent runs are fast and fully
+  offline.
 - **MLX models "work" but are slow**: check nothing is silently running on
-  CPU — `mlx-whisper`/`mlx-audio` should use the GPU via MLX automatically
-  on Apple Silicon. If not, delete `.venv` and re-run `setup.sh` in a clean
-  arm64-only environment.
+  CPU — `mlx-whisper`/`mlx-audio`/`mlx-lm` should use the GPU via MLX
+  automatically on Apple Silicon. If not, delete `.venv` and re-run
+  `setup.sh` in a clean arm64-only environment.
+- **Jarvis calls tools incorrectly or ignores them**: small local models
+  are less reliable at structured tool use than Claude. Try switching
+  `model.local` in `config.yaml` to `model.local_heavy`'s value (or
+  something bigger) for better instruction-following, at the cost of
+  latency.
 - **launchd daemon doesn't start on login**: check
   `~/Library/Logs/jarvis.log`, and confirm the installed plist's
   `ProgramArguments` points at `.venv/bin/python`, not the system Python
@@ -225,7 +281,15 @@ jarvis/
 │   ├── main.py                 entrypoint: pipeline + menu bar + HUD
 │   ├── pipeline.py             wake → stt → brain → tts → HUD state glue
 │   ├── audio/                  wake_word.py, recorder.py, stt.py, tts.py
-│   ├── brain/                  agent.py, memory.py, tools_config.py
+│   ├── brain/
+│   │   ├── agent.py              local tool-calling loop (JarvisSession, run_turn)
+│   │   ├── local_llm.py          mlx-lm model loading + chat()
+│   │   ├── tools.py              tool registry + ToolGuard (confirm/scope/log)
+│   │   ├── tool_types.py         Tool dataclass
+│   │   ├── memory.py             memory-tool file ops
+│   │   ├── web_search.py         free DuckDuckGo search
+│   │   ├── mcp_client.py         minimal stdio MCP client
+│   │   └── browser_tools.py      wraps @playwright/mcp as local tools
 │   ├── hud/                    server.py (WebSocket) + web/ (frontend)
 │   └── system/                 config.py, menubar.py, daemon/*.plist
 ├── scripts/chat_cli.py        text-only harness (Phase 1)
@@ -234,12 +298,13 @@ jarvis/
 
 ## Cost
 
-Recurring cost is Claude API token usage only — STT and TTS are fully
-on-device via MLX, and everything else (Porcupine, memory tool, launchd,
-rumps, pywebview) is free for personal use.
+$0 recurring. STT, TTS, and reasoning are all on-device via MLX; Porcupine,
+the memory tool, launchd, rumps, and pywebview are all free for personal
+use. The only network usage is the one-time model downloads on first run.
 
 ## Stretch goals (not built — see original spec)
 
 Full-duplex/barge-in via Pipecat, Home Assistant integration, proactive
-calendar-aware speech, computer-use tool access, and a cloned custom voice
-are deliberately out of scope for v1.
+calendar-aware speech, computer-use tool access, a cloned custom voice, and
+Gmail/Drive integration (see the architecture note above) are deliberately
+out of scope for this edition.

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Throwaway text-only harness for validating the brain before wiring up
-audio (Phase 1 acceptance test).
+audio (Phase 1 acceptance test). Runs entirely on the local MLX model —
+first run downloads it from Hugging Face (a few GB), then it's offline.
 
 Usage:
     python scripts/chat_cli.py
 """
 
-import asyncio
 import sys
 from pathlib import Path
 
@@ -17,16 +17,13 @@ from src.brain.memory import seed_default_memories
 from src.system.config import load_config
 
 
-async def main() -> None:
+def main() -> None:
     cfg = load_config()
-    if not cfg.anthropic_api_key:
-        print("!! ANTHROPIC_API_KEY is not set in .env — set it before chatting.")
-        return
-
     seed_default_memories()
     session = JarvisSession()
 
-    print("Jarvis text CLI. Ctrl-C or 'exit' to quit.\n")
+    print("Jarvis text CLI (local model). Ctrl-C or 'exit' to quit.")
+    print(f"Model: {cfg.model.local} (first message will download it if not cached)\n")
     while True:
         try:
             user_text = input("you> ").strip()
@@ -38,9 +35,9 @@ async def main() -> None:
         if user_text.lower() in ("exit", "quit"):
             break
 
-        reply = await run_turn(user_text, session, cfg, confirm_fn=default_confirm_fn)
+        reply = run_turn(user_text, session, cfg, confirm_fn=default_confirm_fn)
         print(f"jarvis> {reply}\n")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

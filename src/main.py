@@ -86,8 +86,6 @@ def start_background_work(window: webview.Window, cfg, hud: HudServer) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     cfg = load_config()
-    if not cfg.anthropic_api_key:
-        raise SystemExit("ANTHROPIC_API_KEY is not set in .env — see .env.example.")
 
     hud = HudServer(cfg)
 

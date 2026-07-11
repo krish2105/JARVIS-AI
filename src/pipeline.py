@@ -5,7 +5,6 @@ so the menu bar icon and HUD can reflect what Jarvis is doing.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from pathlib import Path
@@ -43,7 +42,7 @@ class VoiceConfirm:
         self.cfg = cfg
         self.recorder = recorder
 
-    async def __call__(self, description: str, tool_name: str, input_data: dict) -> bool:
+    def __call__(self, description: str, tool_name: str, input_data: dict) -> bool:
         prompt = f"I'm about to {description}. Say confirm to proceed."
         logger.info("CONFIRM tool=%s input=%s prompt=%s", tool_name, input_data, prompt)
         speak(prompt, voice=self.cfg.voice)
@@ -60,8 +59,6 @@ def run_forever(
 ) -> None:
     _configure_logging()
     cfg = cfg or load_config()
-    if not cfg.anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is not set in .env")
 
     seed_default_memories()
 
@@ -95,7 +92,7 @@ def run_forever(
                 continue
 
             emit("thinking", transcript=transcript)
-            reply = asyncio.run(run_turn(transcript, session, cfg, confirm_fn=confirm_fn))
+            reply = run_turn(transcript, session, cfg, confirm_fn=confirm_fn)
 
             emit("speaking", transcript=transcript, reply=reply)
             speak(reply, voice=cfg.voice)

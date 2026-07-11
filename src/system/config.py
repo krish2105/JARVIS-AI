@@ -19,19 +19,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 ENV_PATH = PROJECT_ROOT / ".env"
 
-_SECRET_ENV_KEYS = (
-    "ANTHROPIC_API_KEY",
-    "PICOVOICE_ACCESS_KEY",
-    "GMAIL_MCP_TOKEN",
-    "GDRIVE_MCP_TOKEN",
-)
-
 
 @dataclass
 class ModelConfig:
-    default: str = "claude-sonnet-5"
-    heavy: str = "claude-opus-4-8"
-    fast: str = "claude-haiku-4-5-20251001"
+    # mlx-community model repo ids, downloaded from Hugging Face on first
+    # use and cached locally — no API key, no per-token cost.
+    local: str = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+    local_heavy: str = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
 
 
 @dataclass
@@ -56,32 +50,20 @@ class Config:
     model: ModelConfig = field(default_factory=ModelConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     filesystem_allowlist: list[str] = field(default_factory=list)
-    tool_allowlist: list[str] = field(default_factory=list)
     require_confirmation_for: list[str] = field(default_factory=list)
     hud: HudConfig = field(default_factory=HudConfig)
 
     # populated from environment, not config.yaml
-    anthropic_api_key: str | None = None
     picovoice_access_key: str | None = None
     wake_word_model_path: str | None = None
-    gmail_mcp_url: str | None = None
-    gmail_mcp_token: str | None = None
-    gdrive_mcp_url: str | None = None
-    gdrive_mcp_token: str | None = None
 
     def resolved_filesystem_allowlist(self) -> list[Path]:
         return [Path(p).expanduser().resolve() for p in self.filesystem_allowlist]
 
     def redacted(self) -> dict[str, Any]:
         data = copy.deepcopy(self.__dict__)
-        for key in (
-            "anthropic_api_key",
-            "picovoice_access_key",
-            "gmail_mcp_token",
-            "gdrive_mcp_token",
-        ):
-            if data.get(key):
-                data[key] = "***redacted***"
+        if data.get("picovoice_access_key"):
+            data["picovoice_access_key"] = "***redacted***"
         data["model"] = vars(self.model)
         data["audio"] = vars(self.audio)
         data["hud"] = vars(self.hud)
@@ -104,9 +86,11 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
         wake_word=os.getenv("JARVIS_WAKE_WORD", raw.get("wake_word", "jarvis")),
         voice=raw.get("voice", "am_liam"),
         model=ModelConfig(
-            default=model_raw.get("default", "claude-sonnet-5"),
-            heavy=model_raw.get("heavy", "claude-opus-4-8"),
-            fast=model_raw.get("fast", "claude-haiku-4-5-20251001"),
+            local=os.getenv("JARVIS_LOCAL_MODEL", model_raw.get("local", "mlx-community/Llama-3.2-3B-Instruct-4bit")),
+            local_heavy=os.getenv(
+                "JARVIS_LOCAL_HEAVY_MODEL",
+                model_raw.get("local_heavy", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"),
+            ),
         ),
         audio=AudioConfig(
             sample_rate=audio_raw.get("sample_rate", 16000),
@@ -115,20 +99,14 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
             wake_word_sensitivity=audio_raw.get("wake_word_sensitivity", 0.6),
         ),
         filesystem_allowlist=raw.get("filesystem_allowlist", ["."]),
-        tool_allowlist=raw.get("tool_allowlist", []),
         require_confirmation_for=raw.get("require_confirmation_for", []),
         hud=HudConfig(
             host=hud_raw.get("host", "127.0.0.1"),
             port=hud_raw.get("port", 8765),
             corner=hud_raw.get("corner", "bottom-right"),
         ),
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         picovoice_access_key=os.getenv("PICOVOICE_ACCESS_KEY") or None,
         wake_word_model_path=os.getenv("JARVIS_WAKE_WORD_MODEL_PATH") or None,
-        gmail_mcp_url=os.getenv("GMAIL_MCP_URL") or None,
-        gmail_mcp_token=os.getenv("GMAIL_MCP_TOKEN") or None,
-        gdrive_mcp_url=os.getenv("GDRIVE_MCP_URL") or None,
-        gdrive_mcp_token=os.getenv("GDRIVE_MCP_TOKEN") or None,
     )
     return cfg
 

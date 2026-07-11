@@ -1,11 +1,11 @@
-"""Client-side implementation of Anthropic's memory tool file operations.
+"""Client-side implementation of Anthropic's memory tool file operations,
+repurposed as a plain local tool for the local-LLM tool loop (src/brain/agent.py).
 
-Claude only ever *requests* an operation (view/create/str_replace/insert/
-delete/rename) against a virtual "/memories" path. This module executes
-that request against the real `memories/` directory on disk and returns the
-exact response strings Anthropic's memory tool spec expects, so the model's
-built-in understanding of the tool (learned from training, not from a
-schema we write) behaves correctly.
+Claude's original memory tool spec (view/create/str_replace/insert/delete/
+rename against a virtual /memories path) is a good design regardless of
+which model is doing the calling, so we keep the same command set and
+response strings here — only the registration mechanism changed from a
+Claude Agent SDK MCP tool to a plain Python dispatch function.
 
 https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool
 
@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-
-from claude_agent_sdk import create_sdk_mcp_server, tool
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MEMORY_ROOT = PROJECT_ROOT / "memories"
@@ -194,51 +192,27 @@ class MemoryStore:
         return sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
 
 
-_store = MemoryStore()
-
-
-@tool(
-    name="memory",
-    description=(
-        "Store and retrieve information across conversations in a directory of "
-        "memory files under /memories. Use `view` to list /memories or read a "
-        "file, `create` to write a new file, `str_replace`/`insert` to edit one, "
-        "`delete` to remove one, and `rename` to move/rename one."
-    ),
-    input_schema={
-        "command": str,
-        "path": str,
-        "file_text": str,
-        "old_str": str,
-        "new_str": str,
-        "insert_line": int,
-        "insert_text": str,
-        "old_path": str,
-        "new_path": str,
-        "view_range": list,
-    },
-)
-async def memory_tool(args: dict) -> dict:
-    command = args.get("command")
+def memory_dispatch(tool_input: dict) -> str:
+    """Plain function the local tool loop calls for the "memory" tool.
+    Dispatches on tool_input["command"] to the matching MemoryStore method."""
+    store = MemoryStore()
+    command = tool_input.get("command")
     try:
         if command == "view":
-            result = _store.view(args["path"], args.get("view_range"))
-        elif command == "create":
-            result = _store.create(args["path"], args.get("file_text", ""))
-        elif command == "str_replace":
-            result = _store.str_replace(args["path"], args["old_str"], args.get("new_str"))
-        elif command == "insert":
-            result = _store.insert(args["path"], int(args["insert_line"]), args["insert_text"])
-        elif command == "delete":
-            result = _store.delete(args["path"])
-        elif command == "rename":
-            result = _store.rename(args["old_path"], args["new_path"])
-        else:
-            result = f"Error: unknown command {command}"
+            return store.view(tool_input["path"], tool_input.get("view_range"))
+        if command == "create":
+            return store.create(tool_input["path"], tool_input.get("file_text", ""))
+        if command == "str_replace":
+            return store.str_replace(tool_input["path"], tool_input["old_str"], tool_input.get("new_str"))
+        if command == "insert":
+            return store.insert(tool_input["path"], int(tool_input["insert_line"]), tool_input["insert_text"])
+        if command == "delete":
+            return store.delete(tool_input["path"])
+        if command == "rename":
+            return store.rename(tool_input["old_path"], tool_input["new_path"])
+        return f"Error: unknown command {command}"
     except KeyError as e:
-        result = f"Error: missing required parameter {e}"
-
-    return {"content": [{"type": "text", "text": result}]}
+        return f"Error: missing required parameter {e}"
 
 
 def seed_default_memories() -> None:
@@ -253,6 +227,3 @@ def seed_default_memories() -> None:
             "- Wake word: jarvis\n"
             "- Preferred TTS voice: am_liam\n"
         )
-
-
-memory_server = create_sdk_mcp_server(name="memory", version="1.0.0", tools=[memory_tool])

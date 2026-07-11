@@ -59,7 +59,7 @@ fi
 echo "==> Preparing .env..."
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "   Created .env from .env.example — fill in ANTHROPIC_API_KEY and PICOVOICE_ACCESS_KEY."
+  echo "   Created .env from .env.example — fill in PICOVOICE_ACCESS_KEY."
 else
   echo "   .env already exists, leaving it alone."
 fi
@@ -68,17 +68,23 @@ mkdir -p memories
 touch memories/.gitkeep
 
 echo "==> Verifying imports..."
-python3 -c "import mlx_whisper, mlx_audio, pvporcupine, claude_agent_sdk; print('   all core imports OK')"
+python3 -c "import mlx_whisper, mlx_audio, mlx_lm, pvporcupine; print('   all core imports OK')"
 
 cat <<'EOF'
 
 ==> Setup complete.
 
+No Anthropic API key needed — Jarvis's reasoning runs entirely on a local
+MLX model (see config.yaml). It downloads once from Hugging Face on first
+use (a few GB) and is fully offline after that.
+
 Next steps:
-  1. Edit .env and set ANTHROPIC_API_KEY + PICOVOICE_ACCESS_KEY.
+  1. Edit .env and set PICOVOICE_ACCESS_KEY (free, from console.picovoice.ai).
   2. source .venv/bin/activate
   3. python scripts/chat_cli.py         # Phase 1: text-only sanity check
-  4. python -m src.main                 # Phase 2+: full voice pipeline
+                                         # (first run downloads the local model — be patient)
+  4. python -m src.pipeline             # Phase 2: full voice loop
+  5. python -m src.main                 # Phase 6: voice loop + menu bar + HUD
 
 The first time Jarvis records audio, macOS will show a microphone
 permission prompt — you must accept it. If it never appears, add your

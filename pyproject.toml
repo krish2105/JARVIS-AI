@@ -1,12 +1,12 @@
 [project]
 name = "jarvis"
 version = "0.1.0"
-description = "Local, voice-first personal AI assistant for Apple Silicon Macs, powered by Claude."
+description = "Local, voice-first personal AI assistant for Apple Silicon Macs — fully local reasoning via MLX, no cloud API required."
 requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
-    "claude-agent-sdk",
+    "mlx-lm",
     "mlx-whisper",
     "mlx-audio",
     "misaki",
@@ -14,6 +14,7 @@ dependencies = [
     "sounddevice",
     "webrtcvad",
     "numpy",
+    "requests",
     "pyyaml",
     "python-dotenv",
     "rumps",
@@ -22,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio"]
+dev = ["pytest"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -33,4 +34,3 @@ include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
