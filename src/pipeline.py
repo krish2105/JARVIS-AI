@@ -32,6 +32,7 @@ from src.audio.wake_word import WakeWordListener
 from src.brain.agent import JarvisSession, run_turn
 from src.brain.local_llm import LocalLLM
 from src.brain.memory import seed_default_memories
+from src.brain.tools import set_timer_notifier
 from src.core.cancellation import CancellationToken
 from src.core.state_machine import IllegalTransition, VoiceState, VoiceStateMachine
 from src.system.config import Config, load_config
@@ -120,6 +121,8 @@ def run_forever(
     cfg = cfg or load_config()
 
     seed_default_memories()
+    # Timers announce themselves aloud when they fire.
+    set_timer_notifier(lambda msg: speak(msg, voice=cfg.voice))
 
     wake = WakeWordListener(cfg)
     # A SEPARATE wake model for barge-in. openWakeWord's model is not

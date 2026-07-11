@@ -24,6 +24,9 @@ from pathlib import Path
 from src.brain.browser_tools import build_browser_tools
 from src.brain.memory import memory_dispatch
 from src.brain.memory_db import MemoryDB
+from src.brain.skills.apple import create_reminder, list_reminders
+from src.brain.skills.timers import TimerService
+from src.brain.skills.weather import get_weather
 from src.brain.tool_types import Tool
 from src.brain.web_search import web_search
 from src.system.config import Config
@@ -188,6 +191,56 @@ def _recall(tool_input: dict) -> str:
     return "\n".join(f"- {f.content}" for f in facts)
 
 
+# One timer service for the whole process so timers survive across turns. The
+# pipeline calls set_timer_notifier() at startup to make expiries speak aloud.
+_timer_service = TimerService()
+
+
+def set_timer_notifier(notify) -> None:
+    _timer_service.notify = notify
+
+
+def _set_timer(tool_input: dict) -> str:
+    try:
+        seconds = float(tool_input.get("seconds"))
+    except (TypeError, ValueError):
+        return "Error: give the duration as a number of seconds."
+    if seconds <= 0:
+        return "Error: the duration must be a positive number of seconds."
+    label = str(tool_input.get("label", "")).strip()
+    tid = _timer_service.add(seconds, label)
+    mins = seconds / 60
+    pretty = f"{int(seconds)}s" if seconds < 90 else f"{mins:.0f} min"
+    return f"Timer #{tid} set for {pretty}{' (' + label + ')' if label else ''}."
+
+
+def _check_timers(_tool_input: dict) -> str:
+    active = _timer_service.active()
+    if not active:
+        return "No active timers."
+    return "; ".join(f"#{t['id']} {t['label'] or 'timer'}: {t['remaining']}s left" for t in active)
+
+
+def _cancel_timer(tool_input: dict) -> str:
+    try:
+        tid = int(tool_input.get("id"))
+    except (TypeError, ValueError):
+        return "Error: give the timer id to cancel."
+    return f"Cancelled timer #{tid}." if _timer_service.cancel(tid) else f"No timer #{tid}."
+
+
+def _get_weather(tool_input: dict) -> str:
+    return get_weather(str(tool_input.get("location", "")))
+
+
+def _create_reminder(tool_input: dict) -> str:
+    return create_reminder(str(tool_input.get("text", "")))
+
+
+def _list_reminders(_tool_input: dict) -> str:
+    return list_reminders()
+
+
 def build_tools(cfg: Config) -> dict[str, Tool]:
     allowlist = cfg.resolved_filesystem_allowlist()
 
@@ -257,6 +310,45 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
             description="Search long-term memory for facts about the user.",
             parameters={"query": "string, what to look up"},
             handler=_recall,
+        ),
+        "set_timer": Tool(
+            name="set_timer",
+            description=(
+                "Start a countdown timer. Convert the user's duration to seconds "
+                "yourself (e.g. 10 minutes = 600). Jarvis announces it aloud when it ends."
+            ),
+            parameters={"seconds": "number of seconds", "label": "optional short name, e.g. 'tea'"},
+            handler=_set_timer,
+        ),
+        "check_timers": Tool(
+            name="check_timers",
+            description="List active timers and how long is left on each.",
+            parameters={},
+            handler=_check_timers,
+        ),
+        "cancel_timer": Tool(
+            name="cancel_timer",
+            description="Cancel a timer by its id.",
+            parameters={"id": "the timer id (integer)"},
+            handler=_cancel_timer,
+        ),
+        "get_weather": Tool(
+            name="get_weather",
+            description="Get current weather and today's high/low for a place, by name.",
+            parameters={"location": "city or place name, e.g. 'London'"},
+            handler=_get_weather,
+        ),
+        "create_reminder": Tool(
+            name="create_reminder",
+            description="Add an item to the macOS Reminders app.",
+            parameters={"text": "what to be reminded of, e.g. 'call the bank'"},
+            handler=_create_reminder,
+        ),
+        "list_reminders": Tool(
+            name="list_reminders",
+            description="List the user's open (incomplete) reminders.",
+            parameters={},
+            handler=_list_reminders,
         ),
     }
 
