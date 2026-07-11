@@ -98,7 +98,6 @@ def main() -> None:
         easy_drag=False,
         on_top=True,
         transparent=True,
-        background_color="#00000000",
     )
 
     webview.start(start_background_work, (window, cfg, hud), gui="cocoa", debug=False)
