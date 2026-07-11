@@ -25,8 +25,8 @@ from pathlib import Path
 
 from src.audio.barge_in import BargeInWatcher
 from src.audio.recorder import Recorder
-from src.audio.stt import transcribe
 from src.audio.streaming_speaker import StreamingSpeaker
+from src.audio.stt import transcribe
 from src.audio.tts import speak
 from src.audio.wake_word import WakeWordListener
 from src.brain.agent import JarvisSession, run_turn
