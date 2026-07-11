@@ -147,9 +147,10 @@ first run if missing.
 ```bash
 ./install_daemon.sh
 ```
-Reboot (or log out/in). The menu bar icon should appear automatically with
-no manual terminal command, and the wake word should work immediately.
-Toggle "Pause Jarvis" from the menu to stop it listening without quitting.
+Installs and loads **two** LaunchAgents (see the architecture note below
+for why it's two, not one). Reboot (or log out/in). The menu bar icon
+should appear automatically with no manual terminal command, and the wake
+word should work immediately.
 
 ### Phase 6 — HUD
 ```bash
@@ -159,12 +160,27 @@ A small borderless, always-on-top, transparent HUD appears in the screen
 corner set by `hud.corner` in `config.yaml`, and updates in real time as
 you talk to Jarvis. It's click-through while idle so it never steals focus.
 
-> **Known rough edge**: `src/main.py` runs the HUD (pywebview/Cocoa) on the
-> main thread and the menu bar (rumps/Cocoa) in a background thread. Both
-> want to own macOS's main run loop, which is a known fragile combination.
-> If the menu bar icon misbehaves when launched this way, run
-> `python -m src.system.menubar` as its own process instead and drop the
-> combined `src/main.py` entrypoint from `install_daemon.sh`.
+For the menu bar icon *at the same time*, run this in a second terminal
+tab (or let `install_daemon.sh` manage both as background daemons instead):
+```bash
+python -m src.system.menubar
+```
+
+> **Why two processes, not one**: rumps (menu bar) and pywebview (HUD
+> window) each require macOS's Cocoa main-thread run loop, and AppKit only
+> tolerates one owner of it per process — this isn't a minor quirk, it's
+> fatal. An earlier version of this project tried running rumps in a
+> background thread inside `src.main`, and it crashed the *entire process*
+> (HUD and voice pipeline included) with an uncaught
+> `NSInternalInconsistencyException` the moment the menu bar tried to
+> initialize. `src/system/menubar.py` now runs as its own independent
+> process and never touches the pipeline directly — it just connects to
+> `src.main`'s HUD WebSocket server as a client and mirrors its state, so
+> there's no mic contention between the two. The trade-off: the menu bar's
+> "Pause Jarvis" toggle from earlier versions is gone, since the process
+> that could pause the pipeline (`src.main`) and the process showing the
+> menu bar are no longer the same one. To pause, stop `src.main` itself
+> (Ctrl-C, or `launchctl unload` its LaunchAgent).
 
 ## Running the full test suite
 
@@ -301,7 +317,7 @@ jarvis/
 ├── config.yaml                .env.example / .env (gitignored)
 ├── memories/                  persisted memory-tool files
 ├── src/
-│   ├── main.py                 entrypoint: pipeline + menu bar + HUD
+│   ├── main.py                 entrypoint: voice pipeline + HUD (see menubar note)
 │   ├── pipeline.py             wake → stt → brain → tts → HUD state glue
 │   ├── audio/                  wake_word.py, recorder.py, stt.py, tts.py
 │   ├── brain/

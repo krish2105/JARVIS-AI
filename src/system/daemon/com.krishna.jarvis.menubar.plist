@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template — do not load this file directly. Run install_daemon.sh, which
+  substitutes __PYTHON_BIN__, __WORKING_DIR__, and __LOG_PATH__ with real
+  absolute paths for your machine and copies the result to
+  ~/Library/LaunchAgents/.
+
+  This runs the menu bar (src.system.menubar) as its own process, separate
+  from com.krishna.jarvis.plist (src.main, voice + HUD). They can't share
+  a process: rumps and pywebview both require macOS's Cocoa main-thread
+  run loop, and AppKit only tolerates one owner of it per process.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.krishna.jarvis.menubar</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_BIN__</string>
+        <string>-m</string>
+        <string>src.system.menubar</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WORKING_DIR__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_PATH__</string>
+
+    <key>StandardErrorPath</key>
+    <string>__LOG_PATH__</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

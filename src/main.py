@@ -1,16 +1,21 @@
 """Jarvis entrypoint: starts the HUD websocket server, the voice pipeline,
-the menu bar app, and the HUD overlay window.
+and the HUD overlay window.
 
-Cocoa note: both rumps (menu bar) and pywebview (HUD window) want to own
-macOS's main-thread run loop. pywebview's `webview.start(func, ...)` is
-built for exactly this — it runs `func` in a background thread and then
-blocks the *main* thread with the Cocoa GUI loop for the webview window.
-Running rumps *inside* that same background thread is a known rough edge
-(AppKit really prefers a single owner of the main run loop); it works in
-practice for a status-item-only app but if you see menu bar flakiness on
-your machine, run `python -m src.system.menubar` as its own process
-instead of through this combined entrypoint, and run this file with the
-HUD only.
+Cocoa note: rumps (menu bar) and pywebview (HUD window) each require a
+Cocoa NSApplication run loop, and AppKit only tolerates one per process,
+owned by the main thread. This isn't just a "may misbehave" caveat —
+instantiating rumps' NSStatusBar off the main thread raises an uncaught
+NSInternalInconsistencyException that kills the *entire process*, HUD and
+voice loop included, not just the menu bar. So this file deliberately does
+NOT start the menu bar app. If you want the menu bar icon too, run it as
+its own separate process in another terminal tab:
+
+    python -m src.system.menubar
+
+Properly merging both into one Cocoa run loop would mean building the HUD
+window by hand with PyObjC inside rumps' own NSApplication instead of using
+pywebview's create_window()/start() convenience wrapper — a real rewrite,
+not a quick fix — so for now they run side by side as two processes.
 """
 
 from __future__ import annotations
@@ -27,8 +32,6 @@ from src.pipeline import run_forever
 from src.system.config import load_config
 
 WEB_DIR = Path(__file__).resolve().parent / "hud" / "web"
-
-logger = logging.getLogger("jarvis.main")
 
 _CORNER_OFFSETS = {
     "top-left": lambda sw, sh, w, h: (20, 20),
@@ -74,13 +77,6 @@ def start_background_work(window: webview.Window, cfg, hud: HudServer) -> None:
     threading.Thread(
         target=run_forever, kwargs={"cfg": cfg, "state_callback": on_state}, daemon=True
     ).start()
-
-    try:
-        from src.system.menubar import JarvisMenuBarApp
-
-        threading.Thread(target=lambda: JarvisMenuBarApp().run(), daemon=True).start()
-    except Exception:
-        logger.exception("Menu bar app failed to start; continuing with HUD only.")
 
 
 def main() -> None:

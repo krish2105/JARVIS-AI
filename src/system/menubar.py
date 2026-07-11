@@ -1,15 +1,25 @@
-"""Menu bar status app for Jarvis: shows current pipeline state, lets you
-pause/resume, and quit. Runs the voice pipeline in a background thread since
-rumps needs the main thread for its Cocoa event loop.
+"""Menu bar status app for Jarvis: reflects the current pipeline state and
+lets you quit. Deliberately does NOT run its own copy of the voice
+pipeline — rumps (this app) and pywebview (the HUD window in src.main)
+each require their own OS process's Cocoa main thread, and can't share
+one; running the pipeline in both would also mean two processes fighting
+over the same microphone. Instead this connects, as a plain WebSocket
+client, to the HUD server that src.main already runs, and mirrors its
+state broadcasts.
+
+Run this alongside `python -m src.main` (or its launchd daemon), not
+instead of it — this app alone has no HUD, no pipeline, no mic access.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import threading
 
 import rumps
+import websockets
 
-from src.pipeline import run_forever
 from src.system.config import load_config
 
 STATE_TITLES = {
@@ -17,43 +27,35 @@ STATE_TITLES = {
     "listening": "Jarvis \U0001f3a4",  # 🎤
     "thinking": "Jarvis \U0001f9e0",   # 🧠
     "speaking": "Jarvis \U0001f50a",   # 🔊
-    "paused": "Jarvis ⏸",         # ⏸
 }
+DISCONNECTED_TITLE = "Jarvis ⚠"  # ⚠ — HUD server isn't reachable yet/anymore
+
+RETRY_SECONDS = 2
 
 
 class JarvisMenuBarApp(rumps.App):
     def __init__(self):
-        super().__init__("Jarvis", title=STATE_TITLES["idle"])
-        self._paused = threading.Event()
-        self.pause_item = rumps.MenuItem("Pause Jarvis", callback=self._toggle_pause)
-        self.menu = [self.pause_item]
+        super().__init__("Jarvis", title=DISCONNECTED_TITLE)
+        self.menu = []
+        cfg = load_config()
+        self._ws_url = f"ws://{cfg.hud.host}:{cfg.hud.port}"
+        threading.Thread(target=self._run_client_loop, daemon=True).start()
 
-        self._cfg = load_config()
-        self._thread = threading.Thread(target=self._run_pipeline, daemon=True)
-        self._thread.start()
+    def _run_client_loop(self) -> None:
+        asyncio.run(self._listen_forever())
 
-    def _run_pipeline(self) -> None:
-        run_forever(
-            cfg=self._cfg,
-            state_callback=self._on_state,
-            is_paused=self._paused.is_set,
-        )
-
-    def _on_state(self, state: str, extra: dict) -> None:
-        title = STATE_TITLES["paused"] if self._paused.is_set() else STATE_TITLES.get(state, "Jarvis")
-        # rumps requires UI updates to happen on the main thread; setting
-        # .title directly is safe because rumps marshals it internally.
-        self.title = title
-
-    def _toggle_pause(self, sender: rumps.MenuItem) -> None:
-        if self._paused.is_set():
-            self._paused.clear()
-            sender.title = "Pause Jarvis"
-            self.title = STATE_TITLES["idle"]
-        else:
-            self._paused.set()
-            sender.title = "Resume Jarvis"
-            self.title = STATE_TITLES["paused"]
+    async def _listen_forever(self) -> None:
+        while True:
+            try:
+                async with websockets.connect(self._ws_url) as ws:
+                    async for message in ws:
+                        payload = json.loads(message)
+                        # rumps marshals .title assignment onto the main
+                        # thread internally, so this is safe to set here.
+                        self.title = STATE_TITLES.get(payload.get("state"), "Jarvis")
+            except Exception:
+                self.title = DISCONNECTED_TITLE
+                await asyncio.sleep(RETRY_SECONDS)
 
 
 def main() -> None:

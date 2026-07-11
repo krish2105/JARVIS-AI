@@ -6,7 +6,6 @@ so the menu bar icon and HUD can reflect what Jarvis is doing.
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import Callable
 
@@ -55,7 +54,6 @@ class VoiceConfirm:
 def run_forever(
     cfg: Config | None = None,
     state_callback: StateCallback | None = None,
-    is_paused: Callable[[], bool] | None = None,
 ) -> None:
     _configure_logging()
     cfg = cfg or load_config()
@@ -75,10 +73,6 @@ def run_forever(
     emit("idle")
     try:
         while True:
-            if is_paused and is_paused():
-                time.sleep(0.5)
-                continue
-
             wake.listen_once()
             emit("listening")
 
