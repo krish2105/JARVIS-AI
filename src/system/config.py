@@ -23,9 +23,15 @@ ENV_PATH = PROJECT_ROOT / ".env"
 @dataclass
 class ModelConfig:
     # mlx-community model repo ids, downloaded from Hugging Face on first
-    # use and cached locally — no API key, no per-token cost.
-    local: str = "mlx-community/Llama-3.2-3B-Instruct-4bit"
-    local_heavy: str = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+    # use and cached locally — no API key, no per-token cost. 3B-class
+    # models are NOT used by default: in testing, a 3B model fabricated
+    # ("hallucinated") an entire fake tool execution — inventing a script,
+    # a fake confirmation prompt, and a fake success message — without
+    # ever emitting a real tool call. 8B is the smallest size that follows
+    # the tool-call protocol reliably enough to trust with run_shell/
+    # write_file.
+    local: str = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+    local_heavy: str = "mlx-community/Qwen2.5-14B-Instruct-4bit"
 
 
 @dataclass
@@ -85,10 +91,10 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
         wake_word=os.getenv("JARVIS_WAKE_WORD", raw.get("wake_word", "jarvis")),
         voice=raw.get("voice", "am_liam"),
         model=ModelConfig(
-            local=os.getenv("JARVIS_LOCAL_MODEL", model_raw.get("local", "mlx-community/Llama-3.2-3B-Instruct-4bit")),
+            local=os.getenv("JARVIS_LOCAL_MODEL", model_raw.get("local", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit")),
             local_heavy=os.getenv(
                 "JARVIS_LOCAL_HEAVY_MODEL",
-                model_raw.get("local_heavy", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"),
+                model_raw.get("local_heavy", "mlx-community/Qwen2.5-14B-Instruct-4bit"),
             ),
         ),
         audio=AudioConfig(

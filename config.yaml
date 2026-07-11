@@ -9,13 +9,16 @@ voice: am_liam # Kokoro voice name. Try af_heart, af_bella, am_adam, bm_george, 
 
 # mlx-community model repo ids, run locally via mlx-lm — free, offline,
 # downloaded from Hugging Face on first use and cached thereafter. `local`
-# is the everyday model (fast); `local_heavy` is used for requests that look
-# like multi-step planning (see src/brain/agent.py:select_model). Swap
-# `local` for something bigger (e.g. Qwen2.5-7B-Instruct-4bit) if you have
-# the memory and want better quality at the cost of latency.
+# is the everyday model; `local_heavy` is used for requests that look like
+# multi-step planning (see src/brain/agent.py:select_model).
+#
+# Don't drop `local` below 8B: a 3B model was tested and fabricated an
+# entire fake tool execution (invented script, invented confirmation,
+# invented "success" message) without ever emitting a real tool call. 8B
+# is the smallest size reliable enough to trust with run_shell/write_file.
 model:
-  local: mlx-community/Llama-3.2-3B-Instruct-4bit
-  local_heavy: mlx-community/Meta-Llama-3.1-8B-Instruct-4bit
+  local: mlx-community/Meta-Llama-3.1-8B-Instruct-4bit
+  local_heavy: mlx-community/Qwen2.5-14B-Instruct-4bit
 
 audio:
   sample_rate: 16000

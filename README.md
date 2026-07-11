@@ -195,13 +195,22 @@ hitting the API — a very cheap setup, but not literally $0. This edition
 was built after an explicit request for zero ongoing cost, which means the
 brain had to move on-device too. The trade-offs that come with that:
 
-- **Tool-calling reliability is weaker.** Claude models are trained
-  specifically for reliable structured tool use. Small local models
-  (3B–8B) are instructed to emit a JSON tool-call object via prompt
-  engineering (`src/brain/agent.py`), which works but is less robust —
-  expect occasional malformed JSON or a model that just answers in prose
-  when it should have called a tool. `local_heavy` (8B) is noticeably
-  more reliable at this than `local` (3B); the trade-off is latency.
+- **Tool-calling reliability is weaker, and this is a real risk, not a
+  quality nitpick.** Claude models are trained specifically for reliable
+  structured tool use; local models are instructed to emit a JSON
+  tool-call object via prompt engineering (`src/brain/agent.py`), which is
+  inherently less robust. In testing, a 3B model didn't just fail to call
+  a tool — it **fabricated an entire fake tool execution**: it invented a
+  shell script, invented a fake confirmation exchange, and then claimed
+  "the daemon has been installed and is now running," all without ever
+  emitting a real tool call or touching the filesystem. `model.local`
+  defaults to 8B for this reason, with a hardened system prompt that
+  explicitly forbids claiming an action succeeded without a real tool
+  result. This significantly reduces but does not eliminate the risk —
+  **always check `~/Library/Logs/jarvis.log`** (see Safety rules below) if
+  Jarvis claims to have done something consequential; only lines starting
+  `TOOL_CALL` reflect something that actually happened. If you see this
+  behavior at 8B, bump to `local_heavy` (14B) or larger.
 - **Reasoning quality is weaker**, especially for multi-step plans, math,
   and anything requiring broad world knowledge. Straightforward Q&A,
   reminders, and simple tool calls work fine.
@@ -231,7 +240,10 @@ unchanged either way.
   directory or root. This check is baked directly into the tool
   implementations, so the model has no other path to the filesystem.
 - **Audit log**: every tool call's name, arguments, and result is logged to
-  `~/Library/Logs/jarvis.log` via `ToolGuard.log()`.
+  `~/Library/Logs/jarvis.log` via `ToolGuard.log()` as a `TOOL_CALL` line —
+  this is the ground truth for what Jarvis actually did. If Jarvis says it
+  did something and there's no matching `TOOL_CALL` line, it didn't happen
+  (see the architecture note above on local models fabricating actions).
 - **Mic discipline**: the mic is only actively recording between wake-word
   detection and end-of-turn silence (`src/audio/recorder.py`); wake-word
   listening (`src/audio/wake_word.py`) inspects small rolling frames and
@@ -263,11 +275,15 @@ unchanged either way.
   CPU — `mlx-whisper`/`mlx-audio`/`mlx-lm` should use the GPU via MLX
   automatically on Apple Silicon. If not, delete `.venv` and re-run
   `setup.sh` in a clean arm64-only environment.
-- **Jarvis calls tools incorrectly or ignores them**: small local models
-  are less reliable at structured tool use than Claude. Try switching
-  `model.local` in `config.yaml` to `model.local_heavy`'s value (or
-  something bigger) for better instruction-following, at the cost of
-  latency.
+- **Jarvis claims it did something (ran a command, installed something,
+  wrote a file) but you're not sure it's real**: check
+  `~/Library/Logs/jarvis.log` for a matching `TOOL_CALL` line. If there
+  isn't one, it didn't happen — the model narrated it in plain text
+  instead of actually calling the tool. This is a known failure mode of
+  small local models (see the architecture note above); switch
+  `model.local` to `model.local_heavy`'s value or something bigger if you
+  see it, and never take a consequential claim at face value without
+  checking the log.
 - **launchd daemon doesn't start on login**: check
   `~/Library/Logs/jarvis.log`, and confirm the installed plist's
   `ProgramArguments` points at `.venv/bin/python`, not the system Python
