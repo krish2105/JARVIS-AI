@@ -72,13 +72,16 @@ class VoiceConfirm:
     """Confirmation gate for voice mode: speaks the pending action out loud
     and listens for the user to say "confirm" before Jarvis proceeds."""
 
-    def __init__(self, cfg: Config, recorder: Recorder):
+    def __init__(self, cfg: Config, recorder: Recorder, emit_state=None):
         self.cfg = cfg
         self.recorder = recorder
+        self.emit_state = emit_state  # (description, tool) -> show approval card in HUD
 
     def __call__(self, description: str, tool_name: str, input_data: dict) -> bool:
         prompt = f"I'm about to {description}. Say confirm to proceed."
         logger.info("CONFIRM tool=%s input=%s prompt=%s", tool_name, input_data, prompt)
+        if self.emit_state:
+            self.emit_state(description, tool_name)
         speak(prompt, voice=self.cfg.voice)
         audio = self.recorder.record_utterance()
         heard = transcribe(audio, self.cfg.audio.sample_rate)
@@ -127,7 +130,6 @@ def run_forever(
     barge_wake = WakeWordListener(cfg)
     recorder = Recorder(cfg)
     session = JarvisSession()
-    confirm_fn = VoiceConfirm(cfg, recorder)
 
     def on_event(event) -> None:
         payload = event.as_dict()
@@ -160,6 +162,13 @@ def run_forever(
             speaker.feed(tok)
 
         return on_token
+
+    # Created after `go` so a confirmation can surface an approval card in the
+    # HUD (awaiting_approval) while it waits for the spoken "confirm".
+    confirm_fn = VoiceConfirm(
+        cfg, recorder,
+        emit_state=lambda desc, tool: go(VoiceState.AWAITING_APPROVAL, description=desc, tool=tool),
+    )
 
     go(VoiceState.INITIALIZING)
     _prewarm(cfg)  # load the heavy models NOW so the first "Hey Jarvis" is fast
