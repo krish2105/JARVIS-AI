@@ -42,6 +42,15 @@ fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
+echo "==> Ensuring pip exists inside .venv..."
+# 'uv venv' deliberately creates a virtualenv with no pip inside it (uv
+# installs packages itself, without needing pip). That's fine for uv-driven
+# installs below, but anyone who later runs a plain 'pip install' inside
+# this venv (e.g. following a troubleshooting step) needs pip to actually
+# be there — ensurepip bootstraps it from the standard library, no uv or
+# network access required.
+python -m ensurepip --upgrade >/dev/null 2>&1 || true
+
 echo "==> Installing Python dependencies..."
 if command -v uv >/dev/null 2>&1; then
   uv pip install -e ".[dev]"
