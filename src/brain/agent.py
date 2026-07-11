@@ -10,14 +10,22 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from src.brain.local_llm import LocalLLM
 from src.brain.tool_types import Tool
 from src.brain.tools import ConfirmFn, ToolGuard, build_tools
+from src.core.cancellation import CancellationToken
+from src.core.context import prune_messages
 from src.system.config import Config
 
 MAX_TOOL_ITERATIONS = 6
+# Keep the running conversation bounded so a long-lived daemon can't grow
+# session.messages until it OOMs or overflows the model's context window
+# (which would silently drop the system prompt — and its safety rules).
+CONTEXT_TOKEN_BUDGET = 6000
+CONTEXT_KEEP_RECENT = 8
 
 _HEAVY_HINTS = re.compile(
     r"\b(plan|architect|multi-step|step by step|refactor|design a|"
@@ -119,32 +127,89 @@ class JarvisSession:
     messages: list[dict] = field(default_factory=list)
 
 
+INTERRUPTED_REPLY = ""  # a barge-in produces no spoken reply; the new turn takes over
+
+TokenSink = Callable[[str], None]
+
+
+def _generate_reply(llm, messages, cancel, on_token):
+    """Produce the model's next message. If `on_token` is given, stream it —
+    but buffer the leading characters first so we never emit a partial
+    tool-call JSON to the sink (TTS/HUD): a reply that starts with '{' is a
+    tool call and is buffered silently; anything else is streamed as prose."""
+    if on_token is None:
+        return llm.chat(messages)
+
+    buffer = ""
+    mode: str | None = None  # None -> undecided, "tool" -> buffer, "prose" -> stream
+    for piece in llm.chat_stream(messages, cancel=cancel):
+        buffer += piece
+        if mode is None:
+            stripped = buffer.lstrip()
+            if not stripped:
+                continue
+            if stripped[0] == "{":
+                mode = "tool"
+            else:
+                mode = "prose"
+                on_token(buffer)  # flush everything buffered so far
+        elif mode == "prose":
+            on_token(piece)
+    return buffer
+
+
 def run_turn(
     user_text: str,
     session: JarvisSession,
     cfg: Config,
     confirm_fn: ConfirmFn = default_confirm_fn,
+    cancel: CancellationToken | None = None,
+    on_token: TokenSink | None = None,
 ) -> str:
     """Sends one user turn through the local tool-calling loop and returns
     Jarvis's final text reply. `session.messages` persists conversation
     history for the lifetime of the process, so multi-turn context works
     within a run; facts meant to survive a restart go through the memory
-    tool instead (see src/brain/memory.py)."""
+    tool instead (see src/brain/memory.py).
+
+    If `cancel` is supplied and fires (a barge-in), the loop stops at the next
+    safe checkpoint and returns INTERRUPTED_REPLY WITHOUT executing any tool
+    that hadn't already run — so a stale, pre-interruption action can never
+    fire after the user has moved on."""
     tools = build_tools(cfg)
     guard = ToolGuard(cfg, confirm_fn)
     llm = LocalLLM.get(select_model(cfg, user_text))
+
+    def cancelled() -> bool:
+        return cancel is not None and cancel.cancelled
 
     if not session.messages:
         session.messages.append({"role": "system", "content": build_system_prompt(tools)})
     session.messages.append({"role": "user", "content": user_text})
 
     for _ in range(MAX_TOOL_ITERATIONS):
-        reply = llm.chat(session.messages)
+        if cancelled():
+            return INTERRUPTED_REPLY
+        session.messages = prune_messages(
+            session.messages,
+            max_tokens=CONTEXT_TOKEN_BUDGET,
+            keep_recent=CONTEXT_KEEP_RECENT,
+        )
+        # Only stream the FINAL answer to the sink; tool-call iterations are
+        # internal. We can't know which this is until it's produced, so
+        # _generate_reply buffers the tool-call prefix and streams only prose.
+        reply = _generate_reply(llm, session.messages, cancel, on_token)
         session.messages.append({"role": "assistant", "content": reply})
 
         call = extract_tool_call(reply)
         if call is None:
-            return reply.strip()
+            return INTERRUPTED_REPLY if cancelled() else reply.strip()
+
+        # Re-check AFTER the model produced a tool call but BEFORE we run it:
+        # this is the critical checkpoint that stops a pending side effect from
+        # firing once the user has interrupted.
+        if cancelled():
+            return INTERRUPTED_REPLY
 
         tool = tools.get(call["name"])
         if tool is None:
@@ -153,6 +218,10 @@ def run_turn(
             allowed, reason = guard.check(tool, call["input"])
             if not allowed:
                 result = f"Denied: {reason}"
+            elif cancelled():
+                # Approval may have taken time; bail rather than execute a
+                # now-stale action.
+                return INTERRUPTED_REPLY
             else:
                 try:
                     result = tool.handler(call["input"])

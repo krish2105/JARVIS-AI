@@ -13,10 +13,11 @@ __pycache__/
 # runtime audio scratch files
 *.wav
 
-# personal memory contents — keep the directory, not what's written into it
+# personal memory contents — keep the directory, not what's written into it.
+# preferences.md is intentionally NOT committed: it holds personal facts that
+# Jarvis learns at runtime and must never be baked into the repo.
 memories/*
 !memories/.gitkeep
-!memories/preferences.md
 
 # logs
 *.log

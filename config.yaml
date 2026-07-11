@@ -34,11 +34,14 @@ filesystem_allowlist:
   - "." # the project folder itself
 
 # Tools that must ask for explicit spoken/typed confirmation ("confirm")
-# before they are allowed to execute. Hard requirement — do not remove.
+# before they are allowed to execute. Hard requirement — these four are
+# mandatory (see src/system/config.py:MANDATORY_CONFIRMATIONS) and are
+# re-added automatically if a settings write tries to drop them.
 require_confirmation_for:
-  - delete_file
-  - run_shell_command
-  - Write
+  - delete_file          # deleting a memory file
+  - run_shell_command    # run_shell tool
+  - Write                # write_file tool
+  - browser_action       # any mutating browser action (navigate/click/type/submit/upload)
 
 hud:
   host: 127.0.0.1

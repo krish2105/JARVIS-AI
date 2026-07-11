@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 from src.audio.recorder import Recorder
 from src.audio.stt import transcribe
@@ -29,7 +29,10 @@ from src.audio.tts import speak
 from src.audio.wake_word import WakeWordListener
 from src.brain.agent import JarvisSession, run_turn
 from src.brain.memory import seed_default_memories
+from src.core.cancellation import CancellationToken
+from src.core.state_machine import IllegalTransition, VoiceState, VoiceStateMachine
 from src.system.config import Config, load_config
+from src.system.redaction import redact_secrets, rotating_handler
 
 LOG_DIR = Path.home() / "Library" / "Logs"
 LOG_PATH = LOG_DIR / "jarvis.log"
@@ -41,11 +44,10 @@ StateCallback = Callable[[str, dict], None]
 
 
 def _configure_logging() -> None:
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.FileHandler(LOG_PATH), logging.StreamHandler()],
+        handlers=[rotating_handler(LOG_PATH), logging.StreamHandler()],
     )
 
 
@@ -56,8 +58,8 @@ def _append_transcript(transcript: str, reply: str) -> None:
     TRANSCRIPT_PATH.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "transcript": transcript,
-        "reply": reply,
+        "transcript": redact_secrets(transcript),
+        "reply": redact_secrets(reply),
     }
     with open(TRANSCRIPT_PATH, "a") as f:
         f.write(json.dumps(entry) + "\n")
@@ -95,33 +97,63 @@ def run_forever(
     session = JarvisSession()
     confirm_fn = VoiceConfirm(cfg, recorder)
 
-    def emit(state: str, **extra) -> None:
-        logger.info("STATE %s %s", state, extra)
+    def on_event(event) -> None:
+        payload = event.as_dict()
+        logger.info("STATE %s", payload)
         if state_callback:
-            state_callback(state, extra)
+            # Backward-compatible: HUD/menu bar read payload["state"]; the
+            # richer fields (turn_id, seq, reason, cancellable) ride along.
+            extra = {k: v for k, v in payload.items() if k != "state"}
+            state_callback(event.state.value, extra)
 
-    emit("idle")
+    sm = VoiceStateMachine(session_id="voice", on_event=on_event)
+
+    def go(state: VoiceState, **extra) -> None:
+        # Never let a transition-modeling mistake crash the live voice loop.
+        try:
+            sm.transition(state, source="pipeline", **extra)
+        except IllegalTransition:
+            logger.warning("illegal transition %s -> %s; forcing", sm.state.value, state.value)
+            sm.force(state, reason="forced after illegal transition")
+
+    go(VoiceState.INITIALIZING)
+    go(VoiceState.IDLE)
     try:
         while True:
             wake.listen_once()
-            emit("listening")
+            sm.start_turn()
+            go(VoiceState.WAKE_DETECTED)
+            go(VoiceState.LISTENING)
 
             audio = recorder.record_utterance()
-            emit("thinking")
+            go(VoiceState.TRANSCRIBING)
 
             transcript = transcribe(audio, cfg.audio.sample_rate)
             if not transcript:
                 logger.info("Empty transcript, returning to idle.")
-                emit("idle")
+                go(VoiceState.IDLE)
                 continue
 
-            emit("thinking", transcript=transcript)
-            reply = run_turn(transcript, session, cfg, confirm_fn=confirm_fn)
+            # One cancellation token per turn. A barge-in watcher (mic active
+            # while thinking/speaking) would call cancel.cancel(); wiring that
+            # concurrent watcher is the remaining Mac-verified step — see
+            # docs/IMPLEMENTATION_STATUS.md. The plumbing below already honors
+            # it: run_turn won't execute a stale tool, and speak() stops audio.
+            cancel = CancellationToken()
+
+            go(VoiceState.THINKING, transcript=transcript)
+            reply = run_turn(transcript, session, cfg, confirm_fn=confirm_fn, cancel=cancel)
             _append_transcript(transcript, reply)
 
-            emit("speaking", transcript=transcript, reply=reply)
-            speak(reply, voice=cfg.voice)
-            emit("idle")
+            if not reply:  # interrupted turn produces no spoken reply
+                go(VoiceState.IDLE)
+                continue
+
+            go(VoiceState.SPEAKING, transcript=transcript, reply=reply)
+            interrupted = speak(reply, voice=cfg.voice, should_stop=lambda c=cancel: c.cancelled)
+            if interrupted:
+                sm.barge_in(source="tts", reason="playback interrupted")
+            go(VoiceState.IDLE)
     finally:
         wake.close()
 

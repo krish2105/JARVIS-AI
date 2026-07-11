@@ -174,7 +174,7 @@ def test_guard_log_writes_structured_jsonl_entry(tmp_path, monkeypatch):
 
 # --- local tool-calling loop JSON parsing ---------------------------------
 
-from src.brain.agent import extract_tool_call, run_turn, JarvisSession  # noqa: E402
+from src.brain.agent import JarvisSession, extract_tool_call, run_turn  # noqa: E402
 
 
 def test_extract_tool_call_pure_json():

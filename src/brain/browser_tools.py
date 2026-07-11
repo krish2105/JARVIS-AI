@@ -15,6 +15,24 @@ from src.brain.tool_types import Tool
 
 logger = logging.getLogger("jarvis.browser_tools")
 
+# Browser MCP tools whose names contain one of these substrings are treated
+# as READ_ONLY — they observe the page without acting on the world, so they
+# run without confirmation. Everything else (navigate, click, type, submit,
+# upload, select, drag, dialog handling, tab manipulation) can cause an
+# external side effect on a page the model does not fully control, and is
+# gated behind the "browser_action" confirmation key. Browser page content
+# is untrusted input; a mutating action driven by injected page text must
+# not fire without the user approving it.
+_BROWSER_READONLY_MARKERS = (
+    "snapshot", "screenshot", "console", "network", "wait", "tab_list",
+    "list_tabs", "pdf_save",
+)
+
+
+def _is_readonly(remote_name: str) -> bool:
+    name = remote_name.lower()
+    return any(marker in name for marker in _BROWSER_READONLY_MARKERS)
+
 
 def _stringify_result(result: dict) -> str:
     content = result.get("content") if isinstance(result, dict) else None
@@ -50,5 +68,6 @@ def build_browser_tools() -> dict[str, Tool]:
             description=spec.get("description", ""),
             parameters=spec.get("inputSchema", {}),
             handler=handler,
+            confirm_key=None if _is_readonly(remote_name) else "browser_action",
         )
     return tools

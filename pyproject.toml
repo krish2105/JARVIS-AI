@@ -27,7 +27,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "bandit",
+    "pip-audit",
+]
+# Official MCP SDK — the intended replacement for the hand-rolled stdio client
+# in src/brain/mcp_client.py. Requires Python 3.10+, so it is an opt-in extra
+# rather than a hard dependency (the project still supports the 3.12 target).
+mcp = ["mcp>=1.0"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -38,3 +48,32 @@ include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "S"]
+# S603/S607: subprocess use is intentional and guarded (see tools.py run_shell
+# allowlist + shell=False, and mcp_client stdio transport).
+# S110: try/except/pass in the logging filter is deliberate (logging must
+# never raise). UP is omitted so the code stays runnable on the 3.9 CI lane
+# used for hardware-independent tests as well as the 3.12 target.
+ignore = ["S603", "S607", "S110"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests deliberately touch private helpers, use assert, and have long
+# monkeypatch/fixture lines.
+"tests/*" = ["S101", "S105", "S106", "E501"]
+# Type-narrowing asserts on Popen stdio pipes, not test assertions.
+"src/brain/mcp_client.py" = ["S101"]
+
+[tool.bandit]
+# B404/B603/B607: run_shell is hardened (allowlist + shell=False) and the MCP
+#   client's stdio transport is a trusted local child process.
+# B101: the two asserts in mcp_client.py narrow Popen stdio pipe types; not
+#   test/security assertions.
+# B110: the try/except/pass in redaction.py is deliberate — logging must never
+#   raise.
+skips = ["B404", "B603", "B607", "B101", "B110"]

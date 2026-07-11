@@ -25,13 +25,26 @@ import asyncio
 import json
 import logging
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 import websockets
 
 from src.system.config import Config
 
 logger = logging.getLogger("jarvis.hud")
+
+# Origins allowed to open the HUD socket. The legitimate clients are all
+# non-browser (the voice pipeline and menu bar send no Origin header) or the
+# pywebview window loaded from file:// (Origin absent or the literal "null").
+# A real website the user visits sends its own https:// Origin — WebSocket
+# connections are exempt from CORS, so without this check any page could open
+# ws://127.0.0.1:8765 and read the transcript/memory or delete files
+# (cross-site WebSocket hijacking). None means "no Origin header present".
+_ALLOWED_ORIGINS = (None, "null", "file://")
+
+# Cap inbound frames. The privileged RPC payloads are tiny; anything large is
+# either a bug or an attempt to exhaust memory.
+_MAX_MESSAGE_BYTES = 256 * 1024
 
 
 class HudServer:
@@ -107,7 +120,13 @@ class HudServer:
 
     async def _serve_forever(self) -> None:
         self._loop = asyncio.get_running_loop()
-        async with websockets.serve(self._handler, self.host, self.port):
+        async with websockets.serve(
+            self._handler,
+            self.host,
+            self.port,
+            origins=list(_ALLOWED_ORIGINS),
+            max_size=_MAX_MESSAGE_BYTES,
+        ):
             logger.info("HUD websocket server listening on ws://%s:%s", self.host, self.port)
             await asyncio.Future()  # run forever
 
