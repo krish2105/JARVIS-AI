@@ -24,3 +24,6 @@ memories/*
 
 # node deps pulled in for @playwright/mcp
 node_modules/
+
+# browser MCP scratch
+.playwright-mcp/

@@ -28,6 +28,7 @@ from src.audio.stt import transcribe
 from src.audio.tts import speak
 from src.audio.wake_word import WakeWordListener
 from src.brain.agent import JarvisSession, run_turn
+from src.brain.local_llm import LocalLLM
 from src.brain.memory import seed_default_memories
 from src.core.cancellation import CancellationToken
 from src.core.state_machine import IllegalTransition, VoiceState, VoiceStateMachine
@@ -83,6 +84,29 @@ class VoiceConfirm:
         return "confirm" in heard.lower()
 
 
+def _prewarm(cfg: Config) -> None:
+    """Load the heavy models at startup so the first spoken turn isn't a
+    30-60s cold start (loading Llama + Whisper + Kokoro all at once). Each is
+    best-effort — a prewarm failure must not stop Jarvis from starting."""
+    import numpy as np
+
+    logger.info("prewarming models…")
+    try:
+        LocalLLM.get(cfg.model.local)
+    except Exception:
+        logger.exception("prewarm: LLM load failed")
+    try:
+        transcribe(np.zeros(cfg.audio.sample_rate // 2, dtype=np.int16), cfg.audio.sample_rate)
+    except Exception:
+        logger.exception("prewarm: STT load failed")
+    try:
+        from src.audio.tts import _get_model
+        _get_model()
+    except Exception:
+        logger.exception("prewarm: TTS load failed")
+    logger.info("prewarm complete")
+
+
 def run_forever(
     cfg: Config | None = None,
     state_callback: StateCallback | None = None,
@@ -117,6 +141,7 @@ def run_forever(
             sm.force(state, reason="forced after illegal transition")
 
     go(VoiceState.INITIALIZING)
+    _prewarm(cfg)  # load the heavy models NOW so the first "Hey Jarvis" is fast
     go(VoiceState.IDLE)
     try:
         while True:

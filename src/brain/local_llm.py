@@ -41,7 +41,7 @@ class LocalLLM:
     _loader = staticmethod(_default_loader)
     _stream_fn = staticmethod(_default_stream)
 
-    def __init__(self, model_id: str, max_tokens: int = 700):
+    def __init__(self, model_id: str, max_tokens: int = 300):
         self.model_id = model_id
         self.max_tokens = max_tokens
         self.model, self.tokenizer = type(self)._loader(model_id)
