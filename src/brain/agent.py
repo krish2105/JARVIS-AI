@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from src.brain.local_llm import LocalLLM
@@ -128,6 +129,34 @@ class JarvisSession:
 
 INTERRUPTED_REPLY = ""  # a barge-in produces no spoken reply; the new turn takes over
 
+TokenSink = Callable[[str], None]
+
+
+def _generate_reply(llm, messages, cancel, on_token):
+    """Produce the model's next message. If `on_token` is given, stream it —
+    but buffer the leading characters first so we never emit a partial
+    tool-call JSON to the sink (TTS/HUD): a reply that starts with '{' is a
+    tool call and is buffered silently; anything else is streamed as prose."""
+    if on_token is None:
+        return llm.chat(messages)
+
+    buffer = ""
+    mode: str | None = None  # None -> undecided, "tool" -> buffer, "prose" -> stream
+    for piece in llm.chat_stream(messages, cancel=cancel):
+        buffer += piece
+        if mode is None:
+            stripped = buffer.lstrip()
+            if not stripped:
+                continue
+            if stripped[0] == "{":
+                mode = "tool"
+            else:
+                mode = "prose"
+                on_token(buffer)  # flush everything buffered so far
+        elif mode == "prose":
+            on_token(piece)
+    return buffer
+
 
 def run_turn(
     user_text: str,
@@ -135,6 +164,7 @@ def run_turn(
     cfg: Config,
     confirm_fn: ConfirmFn = default_confirm_fn,
     cancel: CancellationToken | None = None,
+    on_token: TokenSink | None = None,
 ) -> str:
     """Sends one user turn through the local tool-calling loop and returns
     Jarvis's final text reply. `session.messages` persists conversation
@@ -165,7 +195,10 @@ def run_turn(
             max_tokens=CONTEXT_TOKEN_BUDGET,
             keep_recent=CONTEXT_KEEP_RECENT,
         )
-        reply = llm.chat(session.messages)
+        # Only stream the FINAL answer to the sink; tool-call iterations are
+        # internal. We can't know which this is until it's produced, so
+        # _generate_reply buffers the tool-call prefix and streams only prose.
+        reply = _generate_reply(llm, session.messages, cancel, on_token)
         session.messages.append({"role": "assistant", "content": reply})
 
         call = extract_tool_call(reply)

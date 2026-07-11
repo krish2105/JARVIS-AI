@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import gc
 import threading
+from collections.abc import Iterator
+
+from src.core.cancellation import CancellationToken
 
 # At most ONE model stays resident at a time. Two 4-bit models (8B + 14B)
 # resident together will thrash a 16 GB Mac, so switching models evicts the
@@ -23,10 +26,20 @@ def _default_loader(model_id: str):
     return load(model_id)
 
 
+def _default_stream(model, tokenizer, prompt, max_tokens) -> Iterator[str]:
+    """Yield generated text incrementally via mlx-lm's streaming API."""
+    from mlx_lm import stream_generate
+
+    for response in stream_generate(model, tokenizer, prompt, max_tokens=max_tokens):
+        # GenerationResponse.text is the incremental delta in current mlx-lm.
+        yield getattr(response, "text", str(response))
+
+
 class LocalLLM:
-    # Injection points so the cache/eviction logic can be unit-tested without
-    # MLX or real weights: swap _loader for a fake in tests.
+    # Injection points so the cache/eviction/streaming logic can be unit-tested
+    # without MLX or real weights: swap _loader/_stream_fn for fakes in tests.
     _loader = staticmethod(_default_loader)
+    _stream_fn = staticmethod(_default_stream)
 
     def __init__(self, model_id: str, max_tokens: int = 700):
         self.model_id = model_id
@@ -39,6 +52,16 @@ class LocalLLM:
 
         prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True)
         return generate(self.model, self.tokenizer, prompt=prompt, max_tokens=self.max_tokens, verbose=False)
+
+    def chat_stream(self, messages: list[dict], cancel: CancellationToken | None = None) -> Iterator[str]:
+        """Yield the reply incrementally. Stops early (mid-generation) if
+        `cancel` fires — the model side of barge-in, so we don't waste compute
+        finishing a reply the user has already interrupted."""
+        prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+        for piece in type(self)._stream_fn(self.model, self.tokenizer, prompt, self.max_tokens):
+            if cancel is not None and cancel.cancelled:
+                return
+            yield piece
 
     @classmethod
     def get(cls, model_id: str) -> LocalLLM:
