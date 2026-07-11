@@ -13,7 +13,11 @@ dependencies = [
     "mlx-lm",
     "mlx-whisper",
     "mlx-audio",
-    "misaki",
+    # misaki[en] (NOT bare misaki): Kokoro TTS needs misaki's English G2P,
+    # which pulls num2words + spacy + the en_core_web_sm model. Without the
+    # [en] extra, TTS raises "Kokoro requires the optional 'misaki' package"
+    # at synthesis time and produces no audio.
+    "misaki[en]",
     "openwakeword",
     "sounddevice",
     "webrtcvad",

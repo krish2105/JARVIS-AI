@@ -19,9 +19,22 @@ from src.hud.client import HudStateReporter  # noqa: E402
 from src.hud.server import (  # noqa: E402
     HudServer,  # noqa: E402
     _DropHandshakeRejections,
+    _origin_allowed,
     _quiet_handshake_rejections,
 )
 from src.system.config import Config  # noqa: E402
+
+
+def test_origin_policy_allows_local_and_native_but_not_remote():
+    # Native clients (no Origin) and local documents must be allowed — the
+    # HUD's own frontend was being blocked before this policy (a regression
+    # that flooded the log with 403s and broke the HUD window).
+    for ok in (None, "", "null", "file://",
+               "http://127.0.0.1:53421", "http://localhost:8000", "http://[::1]:9"):
+        assert _origin_allowed(ok) is True, ok
+    # A real remote website (the CSWSH threat) must still be refused.
+    for bad in ("https://evil.example", "http://attacker.com", "https://google.com"):
+        assert _origin_allowed(bad) is False, bad
 
 
 def _record(msg: str) -> logging.LogRecord:

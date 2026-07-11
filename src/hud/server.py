@@ -22,10 +22,12 @@ sharing a process with pywebview crashed it.
 from __future__ import annotations
 
 import asyncio
+import http
 import json
 import logging
 import threading
 from collections.abc import Callable
+from urllib.parse import urlparse
 
 import websockets
 
@@ -33,14 +35,29 @@ from src.system.config import Config
 
 logger = logging.getLogger("jarvis.hud")
 
-# Origins allowed to open the HUD socket. The legitimate clients are all
-# non-browser (the voice pipeline and menu bar send no Origin header) or the
-# pywebview window loaded from file:// (Origin absent or the literal "null").
-# A real website the user visits sends its own https:// Origin — WebSocket
-# connections are exempt from CORS, so without this check any page could open
-# ws://127.0.0.1:8765 and read the transcript/memory or delete files
-# (cross-site WebSocket hijacking). None means "no Origin header present".
-_ALLOWED_ORIGINS = (None, "null", "file://")
+# Hosts that only a LOCAL document can present. A remote website (the CSWSH
+# threat) always sends its own domain as the Origin — it can never forge a
+# localhost origin — so trusting these keeps the attack closed while letting
+# the HUD's own frontend connect regardless of how pywebview serves it.
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _origin_allowed(origin: str | None) -> bool:
+    """Which WebSocket Origins may open the HUD socket.
+
+    Allowed: no Origin header (native clients — the voice pipeline and menu
+    bar send none), a file:// document, and any locally-served document
+    (the pywebview HUD window). Rejected: a real remote website's https://
+    Origin — that is the cross-site WebSocket hijacking case that would
+    otherwise read the transcript/memory or delete files.
+    """
+    if origin in (None, "", "null", "file://"):
+        return True
+    try:
+        host = urlparse(origin).hostname
+    except ValueError:
+        return False
+    return host in _LOCAL_HOSTS
 
 # Cap inbound frames. The privileged RPC payloads are tiny; anything large is
 # either a bug or an attempt to exhaust memory.
@@ -136,6 +153,16 @@ class HudServer:
         else:
             self._latest = payload
 
+    def _process_request(self, connection, request):
+        """Pre-handshake Origin gate. Rejecting here (rather than via the
+        static `origins=` list) lets us trust any localhost-served frontend
+        while still refusing remote origins, and logs what was refused."""
+        origin = request.headers.get("Origin")
+        if _origin_allowed(origin):
+            return None
+        logger.info("HUD: rejected WebSocket from origin=%r", origin)
+        return connection.respond(http.HTTPStatus.FORBIDDEN, "origin not allowed\n")
+
     async def _serve_forever(self) -> None:
         self._loop = asyncio.get_running_loop()
         _quiet_handshake_rejections()
@@ -143,7 +170,7 @@ class HudServer:
             self._handler,
             self.host,
             self.port,
-            origins=list(_ALLOWED_ORIGINS),
+            process_request=self._process_request,
             max_size=_MAX_MESSAGE_BYTES,
         ):
             logger.info("HUD websocket server listening on ws://%s:%s", self.host, self.port)
