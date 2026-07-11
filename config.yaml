@@ -1,0 +1,45 @@
+# Jarvis configuration. Secrets stay in .env — this file is safe to commit.
+
+wake_word: jarvis
+
+voice: am_liam # Kokoro voice name. Try af_heart, af_bella, am_adam, bm_george, etc.
+
+model:
+  default: claude-sonnet-5      # everyday reasoning / conversation
+  heavy: claude-opus-4-8        # hard multi-step planning, invoked explicitly by agent.py
+  fast: claude-haiku-4-5-20251001  # cheap/fast intent triage
+
+audio:
+  sample_rate: 16000
+  vad_silence_ms: 700           # how much trailing silence ends a turn
+  max_record_seconds: 15
+  wake_word_sensitivity: 0.6
+
+# Directories Jarvis's filesystem/bash tools are allowed to touch.
+# Never widen this to the whole home directory or root.
+filesystem_allowlist:
+  - "~/Documents"
+  - "~/Desktop"
+  - "." # the project folder itself
+
+# Tools Jarvis may call without restriction.
+tool_allowlist:
+  - Read
+  - WebSearch
+  - Bash
+  - mcp__memory__memory
+  - mcp__playwright
+
+# Tools that must ask for explicit spoken/typed confirmation ("confirm")
+# before they are allowed to execute. Hard requirement — do not remove.
+require_confirmation_for:
+  - send_email
+  - delete_file
+  - run_shell_command
+  - Write
+  - Edit
+
+hud:
+  host: 127.0.0.1
+  port: 8765
+  corner: bottom-right # top-left | top-right | bottom-left | bottom-right
