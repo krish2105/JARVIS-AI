@@ -19,9 +19,17 @@ dependencies = [
     # at synthesis time and produces no audio.
     "misaki[en]",
     "openwakeword",
+    # openWakeWord runs its models through onnxruntime. onnxruntime 1.27.x
+    # SILENTLY produces all-zero scores for openWakeWord's models — the wake
+    # word never fires no matter what you say. 1.20.1 works correctly (verified:
+    # "Hey Jarvis" scores ~0.95). Pin to a known-good, numpy-2-compatible range.
+    "onnxruntime>=1.19.2,<1.21",
     "sounddevice",
     "webrtcvad",
-    "numpy",
+    # numpy window: >=2.0 because scipy (via scikit-learn, an openWakeWord dep)
+    # uses np.long, which only exists in numpy 2.0+; <2.5 because numba (pulled
+    # in transitively) requires NumPy 2.4 or less.
+    "numpy>=2.0,<2.5",
     "requests",
     "pyyaml",
     "python-dotenv",
