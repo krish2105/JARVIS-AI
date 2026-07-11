@@ -6,6 +6,8 @@ requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
+    "setuptools", # provides pkg_resources, which webrtcvad imports internally;
+                  # not bundled by pip/venv automatically on newer Python 3.12
     "mlx-lm",
     "mlx-whisper",
     "mlx-audio",
