@@ -108,9 +108,10 @@ class HudServer:
                 ptype = payload.get("type")
                 if ptype == "request":
                     await self._handle_request(websocket, payload)
-                elif ptype == "approval_decision":
-                    # Relay the HUD's Approve/Deny to the pipeline WITHOUT
-                    # treating it as a status update.
+                elif ptype:
+                    # Any typed control message (approval_decision, command,
+                    # command_stream) is relayed between clients WITHOUT being
+                    # treated as a status update.
                     await self._relay(payload)
                 else:
                     await self._broadcast(payload)

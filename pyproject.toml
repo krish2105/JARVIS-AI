@@ -37,6 +37,7 @@ dependencies = [
     "rumps",
     "pywebview",
     "websockets",
+    "pynput",  # global ⌥Space hotkey for the command bar
 ]
 
 [project.optional-dependencies]

@@ -21,6 +21,7 @@ import json
 import logging
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,6 +50,15 @@ TRANSCRIPT_PATH = LOG_DIR / "jarvis_transcript.jsonl"
 logger = logging.getLogger("jarvis")
 
 StateCallback = Callable[[str, dict], None]
+
+# MLX's Metal GPU streams are thread-local: the LLM must always generate on the
+# SAME thread. A live conversation, a scheduled routine, and a command-bar query
+# all run run_turn, so they're all funnelled through this single-worker pool.
+_llm_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jarvis-llm")
+
+
+def _run_turn(*args, **kwargs):
+    return _llm_pool.submit(run_turn, *args, **kwargs).result()
 
 
 def _configure_logging() -> None:
@@ -115,7 +125,10 @@ def _prewarm(cfg: Config) -> None:
 
     logger.info("prewarming models…")
     try:
-        LocalLLM.get(cfg.model.local)
+        # Load on the pool thread so mlx_lm is imported there — its GPU
+        # generation stream is bound to the importing thread, and ALL LLM
+        # generation runs on this same pool thread (see _run_turn).
+        _llm_pool.submit(LocalLLM.get, cfg.model.local).result()
     except Exception:
         logger.exception("prewarm: LLM load failed")
     try:
@@ -165,7 +178,7 @@ def run_forever(
         try:
             # Auto-deny confirmations: a routine runs unattended, so it must not
             # perform any action that would need a spoken "confirm".
-            reply = run_turn(prompt, JarvisSession(), cfg, confirm_fn=lambda *a: False)
+            reply = _run_turn(prompt, JarvisSession(), cfg, confirm_fn=lambda *a: False)
             if reply:
                 _speak_announcement(reply, "Jarvis")
             return True
@@ -178,6 +191,39 @@ def run_forever(
     routines = get_routine_service()
     routines.set_trigger(routine_trigger)
     routines.start()
+
+    def process_command(cmd_id: str, text: str) -> None:
+        """Run a typed command-bar query and stream the reply back to the HUD."""
+        reporter = state_callback
+        if not turn_lock.acquire(timeout=30):
+            reporter.send_message({"type": "command_stream", "id": cmd_id,
+                                   "reply": "I'm busy right now — try again in a moment.", "done": True})
+            return
+        try:
+            acc = {"t": ""}
+
+            def on_tok(tok: str) -> None:
+                acc["t"] += tok
+                reporter.send_message({"type": "command_stream", "id": cmd_id, "reply": acc["t"], "done": False})
+
+            # Typed queries auto-deny confirmations (no spoken confirm loop);
+            # Q&A and safe tools still work.
+            reply = _run_turn(text, JarvisSession(), cfg, confirm_fn=lambda *a: False, on_token=on_tok)
+            reporter.send_message({"type": "command_stream", "id": cmd_id,
+                                   "reply": reply or "(no answer)", "done": True})
+        except Exception:  # noqa: BLE001
+            logger.exception("command failed")
+            reporter.send_message({"type": "command_stream", "id": cmd_id,
+                                   "reply": "Something went wrong.", "done": True})
+        finally:
+            turn_lock.release()
+
+    if state_callback is not None and hasattr(state_callback, "set_command_handler"):
+        state_callback.set_command_handler(
+            lambda cmd_id, text: threading.Thread(
+                target=process_command, args=(cmd_id, text), daemon=True
+            ).start()
+        )
 
     wake = WakeWordListener(cfg)
     # A SEPARATE wake model for barge-in. openWakeWord's model is not
@@ -276,7 +322,7 @@ def run_forever(
                     from src.audio.duplex import DuplexSpeaker
                     speaker = DuplexSpeaker(cfg.voice, barge_wake, cancel)
                     speaker.start()
-                    reply = run_turn(
+                    reply = _run_turn(
                         transcript, session, cfg, confirm_fn=confirm_fn,
                         cancel=cancel, on_token=make_on_token(speaker, transcript),
                     )
@@ -291,7 +337,7 @@ def run_forever(
                     barge = BargeInWatcher(barge_wake, cancel)
                     barge.start()
                     speaker = StreamingSpeaker(cfg.voice, cancel=cancel)
-                    reply = run_turn(
+                    reply = _run_turn(
                         transcript, session, cfg, confirm_fn=confirm_fn,
                         cancel=cancel, on_token=make_on_token(speaker, transcript, on_first=barge.stop),
                     )

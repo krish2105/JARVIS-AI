@@ -8,6 +8,7 @@ audio:
   vad_silence_ms: 700
   max_record_seconds: 15
   wake_word_sensitivity: 0.4
+  full_duplex: true
 filesystem_allowlist:
 - ~/Documents
 - ~/Desktop

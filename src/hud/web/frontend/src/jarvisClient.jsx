@@ -8,6 +8,7 @@ const JarvisContext = createContext(null);
 export function JarvisProvider({ children }) {
   const wsRef = useRef(null);
   const pending = useRef(new Map());
+  const commandSubs = useRef(new Map());
   const [status, setStatus] = useState({ state: "idle", transcript: "", reply: "" });
   const [connected, setConnected] = useState(false);
 
@@ -41,6 +42,15 @@ export function JarvisProvider({ children }) {
           }
           return;
         }
+        if (payload.type === "command_stream") {
+          const cb = commandSubs.current.get(payload.id);
+          if (cb) {
+            cb(payload);
+            if (payload.done) commandSubs.current.delete(payload.id);
+          }
+          return;
+        }
+        if (payload.type) return; // other control messages (e.g. our own echo)
         setStatus(payload);
       };
     }
@@ -74,8 +84,16 @@ export function JarvisProvider({ children }) {
     }
   }, []);
 
+  // Submit a typed command-bar query; onChunk({reply, done}) fires as it streams.
+  const sendCommand = useCallback((text, onChunk) => {
+    const id = Math.random().toString(36).slice(2);
+    commandSubs.current.set(id, onChunk);
+    send({ type: "command", id, text });
+    return id;
+  }, [send]);
+
   return (
-    <JarvisContext.Provider value={{ status, connected, request, send }}>
+    <JarvisContext.Provider value={{ status, connected, request, send, sendCommand }}>
       {children}
     </JarvisContext.Provider>
   );

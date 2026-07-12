@@ -46,24 +46,54 @@ WEB_DIR = Path(__file__).resolve().parent / "hud" / "web" / "dist"
 
 
 class OrbApi:
-    """Exposed to the orb window's JS as window.pywebview.api. Clicking the orb
-    calls toggle_main() to show/hide the main HUD window."""
+    """Exposed to the orb + command-bar windows as window.pywebview.api.
+    Clicking the orb opens the command bar; Esc in the command bar hides it."""
 
     def __init__(self) -> None:
         self.main = None
-        self._hidden = False
+        self.command = None
+        self._main_hidden = False
 
     def toggle_main(self) -> None:
         if self.main is None:
             return
         try:
-            if self._hidden:
-                self.main.show()
-            else:
-                self.main.hide()
-            self._hidden = not self._hidden
+            self.main.hide() if not self._main_hidden else self.main.show()
+            self._main_hidden = not self._main_hidden
         except Exception:  # noqa: BLE001
             logging.exception("toggle_main failed")
+
+    def show_command(self) -> None:
+        if self.command is None:
+            return
+        try:
+            self.command.show()
+        except Exception:  # noqa: BLE001
+            logging.exception("show_command failed")
+
+    def hide_command(self) -> None:
+        if self.command is None:
+            return
+        try:
+            self.command.hide()
+        except Exception:  # noqa: BLE001
+            logging.exception("hide_command failed")
+
+
+def _start_global_hotkey(api: "OrbApi") -> None:
+    """Global ⌥Space to summon the command bar. Needs macOS Accessibility
+    permission; best-effort — the orb click works without it."""
+    try:
+        from pynput import keyboard
+
+        def on_hotkey() -> None:
+            api.show_command()
+
+        listener = keyboard.GlobalHotKeys({"<alt>+<space>": on_hotkey})
+        listener.daemon = True
+        listener.start()
+    except Exception:  # noqa: BLE001
+        logging.exception("global hotkey unavailable (grant Accessibility to enable)")
 
 
 def main() -> None:
@@ -105,6 +135,27 @@ def main() -> None:
     except Exception:  # noqa: BLE001
         logging.exception("could not create the ambient orb window")
 
+    # Command bar: a Spotlight-style "ask anything" window. Hidden until the
+    # orb is clicked or the ⌥Space hotkey fires.
+    try:
+        api.command = webview.create_window(
+            "Jarvis Command",
+            url=str(WEB_DIR / "index.html") + "#command",
+            width=680,
+            height=420,
+            x=400,
+            y=160,
+            frameless=True,
+            on_top=True,
+            transparent=True,
+            resizable=False,
+            hidden=True,
+            js_api=api,
+        )
+    except Exception:  # noqa: BLE001
+        logging.exception("could not create the command-bar window")
+
+    _start_global_hotkey(api)
     webview.start(hud.run_in_background_thread, gui="cocoa", debug=False)
 
 

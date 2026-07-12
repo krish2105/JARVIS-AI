@@ -25,9 +25,9 @@ export default function OrbWidget() {
   const level = state === "listening" && typeof status.level === "number" ? status.level : 0;
   const scale = 1 + Math.min(1, level) * 0.22;
 
-  function toggleMain() {
+  function openCommand() {
     try {
-      window.pywebview?.api?.toggle_main();
+      window.pywebview?.api?.show_command();
     } catch (e) {
       /* not running under pywebview (e.g. browser preview) */
     }
@@ -36,8 +36,8 @@ export default function OrbWidget() {
   return (
     <div
       className={"orb-widget tone-" + tone}
-      title={connected ? "Click to show/hide Jarvis · drag to move" : "disconnected"}
-      onClick={toggleMain}
+      title={connected ? "Click to ask Jarvis · drag to move" : "disconnected"}
+      onClick={openCommand}
     >
       <div className={"ow-orb " + (active ? "on" : "idle")} style={{ transform: `scale(${scale})` }}>
         <div className="orb-ring" />

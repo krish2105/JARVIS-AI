@@ -27,11 +27,20 @@ class HudStateReporter:
     def __init__(self, cfg: Config):
         self._url = f"ws://{cfg.hud.host}:{cfg.hud.port}"
         self._queue: queue.Queue = queue.Queue()
+        self._on_command = None  # set by the pipeline to handle command-bar queries
         threading.Thread(target=self._run_loop, daemon=True).start()
 
     def __call__(self, state: str, extra: dict) -> None:
         """Matches src.pipeline's StateCallback signature."""
         self._queue.put({"state": state, **extra})
+
+    def send_message(self, obj: dict) -> None:
+        """Send an arbitrary control message (e.g. a command_stream chunk)."""
+        self._queue.put(obj)
+
+    def set_command_handler(self, handler) -> None:
+        """handler(command_id, text) is called when the command bar submits."""
+        self._on_command = handler
 
     def _run_loop(self) -> None:
         asyncio.run(self._send_forever())
@@ -62,3 +71,5 @@ class HudStateReporter:
                 continue
             if data.get("type") == "approval_decision":
                 approvals.resolve(data.get("id"), bool(data.get("approved")))
+            elif data.get("type") == "command" and self._on_command is not None:
+                self._on_command(data.get("id"), data.get("text", ""))
