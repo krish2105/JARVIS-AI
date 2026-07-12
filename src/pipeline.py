@@ -172,14 +172,21 @@ def run_forever(
         """Build the streaming sink. On the FIRST token we (1) close the
         barge-in mic so the speaker has the audio device to itself — two
         concurrent streams (mic in + TTS out) garble playback — and (2) flip
-        the HUD to SPEAKING. Every token then feeds the incremental TTS."""
+        the HUD to SPEAKING. Every token feeds the incremental TTS AND streams
+        the growing reply text to the HUD so it types out live as it's spoken."""
         fired = {"v": False}
+        acc = {"text": ""}
 
         def on_token(tok: str) -> None:
+            acc["text"] += tok
             if not fired["v"]:
                 fired["v"] = True
                 barge.stop()  # release the mic BEFORE any audio plays
-                go(VoiceState.SPEAKING, transcript=transcript)
+                go(VoiceState.SPEAKING, transcript=transcript, reply=acc["text"])
+            elif state_callback:
+                # Direct partial update (not a state transition) so the reply
+                # streams to the HUD without spamming the state log.
+                state_callback("speaking", {"transcript": transcript, "reply": acc["text"]})
             speaker.feed(tok)
 
         return on_token
@@ -205,7 +212,10 @@ def run_forever(
                 sm.start_turn()
                 go(VoiceState.LISTENING)
                 if audio is None:
-                    audio = recorder.record_utterance()
+                    def on_level(lvl: float) -> None:
+                        if state_callback:
+                            state_callback("listening", {"level": round(lvl, 3)})
+                    audio = recorder.record_utterance(on_level=on_level)
                 go(VoiceState.TRANSCRIBING)
 
                 transcript = transcribe(audio, cfg.audio.sample_rate)

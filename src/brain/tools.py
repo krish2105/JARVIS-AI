@@ -24,6 +24,7 @@ from pathlib import Path
 from src.brain.browser_tools import build_browser_tools
 from src.brain.memory import memory_dispatch
 from src.brain.memory_db import MemoryDB
+from src.brain.skills import music, system_control
 from src.brain.skills.apple import create_event, create_reminder, list_events, list_reminders
 from src.brain.skills.timers import TimerService
 from src.brain.skills.weather import get_weather
@@ -257,6 +258,32 @@ def _create_event(tool_input: dict) -> str:
     return create_event(str(tool_input.get("title", "")), str(tool_input.get("start", "")), duration)
 
 
+def _set_volume(tool_input: dict) -> str:
+    try:
+        return system_control.set_volume(int(tool_input["level"]))
+    except (KeyError, TypeError, ValueError):
+        return "Error: give the volume level 0-100."
+
+
+def _change_volume(tool_input: dict) -> str:
+    try:
+        return system_control.change_volume(int(tool_input.get("delta", 10)))
+    except (TypeError, ValueError):
+        return "Error: give a numeric change amount."
+
+
+def _system(fn):
+    return lambda _tool_input: fn()
+
+
+def _open_app(tool_input: dict) -> str:
+    return system_control.open_app(str(tool_input.get("name", "")))
+
+
+def _music_play_query(tool_input: dict) -> str:
+    return music.play_playlist(str(tool_input.get("playlist", "")))
+
+
 def build_tools(cfg: Config) -> dict[str, Tool]:
     allowlist = cfg.resolved_filesystem_allowlist()
 
@@ -384,6 +411,56 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
                 "duration_minutes": "integer, default 60",
             },
             handler=_create_event,
+        ),
+        # --- system control ---
+        "set_volume": Tool(
+            name="set_volume", description="Set the system output volume (0-100).",
+            parameters={"level": "integer 0-100"}, handler=_set_volume,
+        ),
+        "change_volume": Tool(
+            name="change_volume", description="Turn the volume up or down by a relative amount.",
+            parameters={"delta": "integer, e.g. 10 or -10"}, handler=_change_volume,
+        ),
+        "get_volume": Tool(
+            name="get_volume", description="Report the current output volume.",
+            parameters={}, handler=_system(system_control.get_volume),
+        ),
+        "toggle_dark_mode": Tool(
+            name="toggle_dark_mode", description="Switch macOS between light and dark appearance.",
+            parameters={}, handler=_system(system_control.toggle_dark_mode),
+        ),
+        "open_app": Tool(
+            name="open_app", description="Open a macOS app by name, e.g. Safari, Notes, Slack.",
+            parameters={"name": "string, the app name"}, handler=_open_app,
+        ),
+        "lock_screen": Tool(
+            name="lock_screen", description="Lock the screen / put the display to sleep.",
+            parameters={}, handler=_system(system_control.lock_screen),
+        ),
+        # --- music (Apple Music) ---
+        "music_play": Tool(
+            name="music_play", description="Resume/start Apple Music playback.",
+            parameters={}, handler=_system(music.play),
+        ),
+        "music_pause": Tool(
+            name="music_pause", description="Pause Apple Music.",
+            parameters={}, handler=_system(music.pause),
+        ),
+        "music_next": Tool(
+            name="music_next", description="Skip to the next track.",
+            parameters={}, handler=_system(music.next_track),
+        ),
+        "music_previous": Tool(
+            name="music_previous", description="Go to the previous track.",
+            parameters={}, handler=_system(music.previous_track),
+        ),
+        "music_current": Tool(
+            name="music_current", description="Say what track is currently playing.",
+            parameters={}, handler=_system(music.current_track),
+        ),
+        "music_play_playlist": Tool(
+            name="music_play_playlist", description="Play a named Apple Music playlist.",
+            parameters={"playlist": "string, the playlist name"}, handler=_music_play_query,
         ),
     }
 

@@ -25,8 +25,10 @@ class Recorder:
         self.silence_ms = cfg.audio.vad_silence_ms
         self.max_seconds = cfg.audio.max_record_seconds
 
-    def record_utterance(self) -> np.ndarray:
-        """Returns a 1-D int16 numpy array of the captured utterance."""
+    def record_utterance(self, on_level=None) -> np.ndarray:
+        """Returns a 1-D int16 numpy array of the captured utterance. If
+        `on_level` is given, it's called each frame with a 0-1 loudness value
+        so the HUD can draw a live waveform of the user's voice."""
         frames: list[np.ndarray] = []
         silence_run_ms = 0
         speech_started = False
@@ -42,6 +44,10 @@ class Recorder:
                 pcm, _ = stream.read(self.frame_samples)
                 pcm = pcm.reshape(-1)
                 frames.append(pcm.copy())
+
+                if on_level is not None:
+                    rms = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2)))
+                    on_level(min(1.0, rms / 3000.0))  # ~3000 rms ≈ normal speech peak
 
                 is_speech = self.vad.is_speech(pcm.tobytes(), self.sample_rate)
                 if is_speech:

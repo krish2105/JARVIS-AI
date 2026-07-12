@@ -16,11 +16,23 @@ const STATE_LABEL = {
 
 const ACTIVE = new Set(["listening", "transcribing", "thinking", "executing", "speaking"]);
 
+const WAVE_BARS = 18;
+
 export default function ConversationView() {
   const { status, request, send } = useJarvis();
   const [turns, setTurns] = useState([]);
   const [decided, setDecided] = useState(null);
+  const [levels, setLevels] = useState(() => Array(WAVE_BARS).fill(0));
   const state = status.state || "idle";
+
+  // Feed the live mic level into a scrolling waveform buffer while listening.
+  useEffect(() => {
+    if (state === "listening" && typeof status.level === "number") {
+      setLevels((prev) => [...prev.slice(1), status.level]);
+    } else if (state !== "listening") {
+      setLevels((prev) => (prev.some((v) => v > 0) ? Array(WAVE_BARS).fill(0) : prev));
+    }
+  }, [status.level, state]);
 
   function decide(approved) {
     if (status.approval_id) {
@@ -55,9 +67,17 @@ export default function ConversationView() {
         <div className="stage-txt">
           <div className="stage-label">● {STATE_LABEL[state] || state.toUpperCase()}</div>
           <div className="wave" aria-hidden="true">
-            {Array.from({ length: 13 }).map((_, i) => (
-              <i key={i} className={ACTIVE.has(state) ? "on" : ""} style={{ animationDelay: `${(i % 7) * 0.09}s` }} />
-            ))}
+            {state === "listening"
+              ? levels.map((lv, i) => (
+                  <i key={i} className="live" style={{ height: `${3 + Math.min(1, lv) * 23}px` }} />
+                ))
+              : Array.from({ length: WAVE_BARS }).map((_, i) => (
+                  <i
+                    key={i}
+                    className={ACTIVE.has(state) ? "on" : ""}
+                    style={{ animationDelay: `${(i % 7) * 0.09}s` }}
+                  />
+                ))}
           </div>
           {liveHeard ? (
             <div className="heard"><span className="cue">heard:</span> “{liveHeard}”</div>
