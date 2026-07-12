@@ -74,3 +74,16 @@ def test_weather_unknown_place():
 
 def test_weather_empty_location():
     assert get_weather("", get=_fake_getter([], {})).startswith("Error")
+
+
+# --- calendar (input validation, no osascript) ----------------------------
+
+
+def test_create_event_requires_title():
+    from src.brain.skills.apple import create_event
+    assert create_event("", "2026-07-12 13:00").startswith("Error")
+
+
+def test_create_event_rejects_bad_start():
+    from src.brain.skills.apple import create_event
+    assert create_event("Lunch", "not-a-date").startswith("Error")

@@ -7,6 +7,7 @@ import SkillsView from "./components/SkillsView.jsx";
 import PermissionsView from "./components/PermissionsView.jsx";
 import ActivityView from "./components/ActivityView.jsx";
 import SettingsView from "./components/SettingsView.jsx";
+import Onboarding from "./components/Onboarding.jsx";
 
 const TABS = [
   { id: "conversation", label: "Conversation", icon: "◉" },
@@ -40,6 +41,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <Onboarding />
       <header className="titlebar">
         <span className="wordmark">JAR<b>V</b>IS</span>
         <span className={"statepill tone-" + meta.tone}>

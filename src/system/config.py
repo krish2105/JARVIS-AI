@@ -65,6 +65,7 @@ class Config:
     filesystem_allowlist: list[str] = field(default_factory=list)
     require_confirmation_for: list[str] = field(default_factory=list)
     hud: HudConfig = field(default_factory=HudConfig)
+    onboarded: bool = False  # first-run wizard completed?
 
     # populated from environment, not config.yaml — optional path to a custom
     # openWakeWord model file, if you ever train one beyond the bundled
@@ -119,6 +120,7 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
             host=hud_raw.get("host", "127.0.0.1"),
             port=hud_raw.get("port", 8765),
         ),
+        onboarded=bool(raw.get("onboarded", False)),
         wake_word_model_path=os.getenv("JARVIS_WAKE_WORD_MODEL_PATH") or None,
     )
     return cfg

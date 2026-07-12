@@ -213,6 +213,25 @@ h4 { margin: 0; }
 /* legacy status view (kept in case) */
 .status-view, .ring-wrap, .ring-bg, .ring-fg, .core, .label, .caption, .hint { }
 
+/* ---- onboarding ---- */
+.ob-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  background: rgba(5,8,13,.72); backdrop-filter: blur(4px); padding: 24px; }
+.ob-card { width: 100%; max-width: 440px; background: linear-gradient(180deg, var(--panel), var(--ink2));
+  border: 1px solid var(--line); border-radius: 18px; padding: 24px; box-shadow: 0 30px 80px -20px rgba(0,0,0,.85);
+  display: flex; flex-direction: column; gap: 14px; }
+.ob-dots { display: flex; gap: 6px; }
+.ob-dot { width: 22px; height: 4px; border-radius: 3px; background: var(--line); }
+.ob-dot.on { background: var(--cyan); }
+.ob-card h2 { font-size: 20px; }
+.ob-body { color: var(--muted); font-size: 14px; line-height: 1.6; display: flex; flex-direction: column; gap: 10px; }
+.ob-body p { margin: 0; }
+.ob-body b { color: var(--text); }
+.ob-body .muted-note { font-size: 12.5px; color: var(--faint); }
+.ob-body select { background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
+  padding: 9px 11px; font-size: 14px; font-family: var(--display); }
+.ob-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--text); }
+.ob-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+
 @media (prefers-reduced-motion: reduce) {
   .orb.tone-on .orb-ring, .wave i.on, .caret, .statepill .dot { animation: none !important; }
 }

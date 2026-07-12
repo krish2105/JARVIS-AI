@@ -12,6 +12,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from src.brain.local_llm import LocalLLM
 from src.brain.tool_types import Tool
@@ -76,8 +77,15 @@ def _render_tools_block(tools: dict[str, Tool]) -> str:
     )
 
 
-def build_system_prompt(tools: dict[str, Tool]) -> str:
-    return _JARVIS_PERSONA + "\n" + _TOOL_PROTOCOL.format(tools_block=_render_tools_block(tools))
+def build_system_prompt(tools: dict[str, Tool], now: datetime | None = None) -> str:
+    prompt = _JARVIS_PERSONA + "\n" + _TOOL_PROTOCOL.format(tools_block=_render_tools_block(tools))
+    if now is not None:
+        prompt += (
+            f"\nThe current date and time is {now.strftime('%A, %Y-%m-%d %H:%M')}. "
+            "Use this to work out relative times like 'tomorrow' or 'in 2 hours' "
+            "when setting timers, reminders, or calendar events."
+        )
+    return prompt
 
 
 _TOOL_CALL_BLOCK_RE = re.compile(r"\{.*\"tool_call\".*\}", re.DOTALL)
@@ -183,8 +191,13 @@ def run_turn(
     def cancelled() -> bool:
         return cancel is not None and cancel.cancelled
 
+    # Refresh the system prompt each turn so the current date/time is always
+    # accurate (needed for 'tomorrow', 'in 2 hours', calendar/reminder math).
+    system_prompt = {"role": "system", "content": build_system_prompt(tools, now=datetime.now())}
     if not session.messages:
-        session.messages.append({"role": "system", "content": build_system_prompt(tools)})
+        session.messages.append(system_prompt)
+    else:
+        session.messages[0] = system_prompt
     session.messages.append({"role": "user", "content": user_text})
 
     for _ in range(MAX_TOOL_ITERATIONS):

@@ -24,7 +24,7 @@ from pathlib import Path
 from src.brain.browser_tools import build_browser_tools
 from src.brain.memory import memory_dispatch
 from src.brain.memory_db import MemoryDB
-from src.brain.skills.apple import create_reminder, list_reminders
+from src.brain.skills.apple import create_event, create_reminder, list_events, list_reminders
 from src.brain.skills.timers import TimerService
 from src.brain.skills.weather import get_weather
 from src.brain.tool_types import Tool
@@ -241,6 +241,22 @@ def _list_reminders(_tool_input: dict) -> str:
     return list_reminders()
 
 
+def _list_events(tool_input: dict) -> str:
+    try:
+        days = int(tool_input.get("days", 1))
+    except (TypeError, ValueError):
+        days = 1
+    return list_events(days)
+
+
+def _create_event(tool_input: dict) -> str:
+    try:
+        duration = int(tool_input.get("duration_minutes", 60))
+    except (TypeError, ValueError):
+        duration = 60
+    return create_event(str(tool_input.get("title", "")), str(tool_input.get("start", "")), duration)
+
+
 def build_tools(cfg: Config) -> dict[str, Tool]:
     allowlist = cfg.resolved_filesystem_allowlist()
 
@@ -349,6 +365,25 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
             description="List the user's open (incomplete) reminders.",
             parameters={},
             handler=_list_reminders,
+        ),
+        "list_events": Tool(
+            name="list_events",
+            description="List calendar events for the next N days (default 1 = today).",
+            parameters={"days": "integer, how many days ahead (1 = today)"},
+            handler=_list_events,
+        ),
+        "create_event": Tool(
+            name="create_event",
+            description=(
+                "Add an event to the calendar. Provide the start as "
+                "'YYYY-MM-DD HH:MM' (24-hour); compute the date from today yourself."
+            ),
+            parameters={
+                "title": "string, the event name",
+                "start": "string, 'YYYY-MM-DD HH:MM'",
+                "duration_minutes": "integer, default 60",
+            },
+            handler=_create_event,
         ),
     }
 

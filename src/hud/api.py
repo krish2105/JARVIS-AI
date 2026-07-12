@@ -30,6 +30,7 @@ _EDITABLE_CONFIG_PATHS = {
     "audio.max_record_seconds",
     "filesystem_allowlist",
     "require_confirmation_for",
+    "onboarded",
 }
 
 
