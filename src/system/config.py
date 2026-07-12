@@ -25,7 +25,7 @@ ENV_PATH = PROJECT_ROOT / ".env"
 # disable the confirmation that protects file writes, shell commands, memory
 # deletion, and browser side effects. Enforced by update_config_yaml and by
 # src/hud/api.py's save_config.
-MANDATORY_CONFIRMATIONS = ("delete_file", "run_shell_command", "Write", "browser_action")
+MANDATORY_CONFIRMATIONS = ("delete_file", "run_shell_command", "Write", "browser_action", "send_message")
 
 
 @dataclass

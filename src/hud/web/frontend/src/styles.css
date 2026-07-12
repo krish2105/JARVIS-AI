@@ -375,3 +375,7 @@ body.orb-mode, body.orb-mode #root { background: transparent !important; }
 .ts-spin { margin-left: auto; width: 11px; height: 11px; border-radius: 50%;
   border: 2px solid rgba(56,208,240,.25); border-top-color: var(--cyan); animation: tspin .7s linear infinite; }
 @keyframes tspin { to { transform: rotate(360deg); } }
+
+/* mail + messages result cards */
+.rcard.rc-em { --accent: #7aa2ff; }
+.rcard.rc-ms { --accent: #41d69a; }

@@ -25,7 +25,7 @@ from pathlib import Path
 from src.brain.browser_tools import build_browser_tools
 from src.brain.memory import memory_dispatch
 from src.brain.memory_db import MemoryDB
-from src.brain.skills import music, system_control
+from src.brain.skills import mail, messages, music, system_control
 from src.brain.skills.apple import create_event, create_reminder, list_events, list_reminders
 from src.brain.skills.routines import RoutineService
 from src.brain.skills.timers import TimerService
@@ -349,6 +349,47 @@ def _music_current(_tool_input: dict) -> str:
     return result
 
 
+# --- mail ---
+def _mail_unread(tool_input: dict) -> str:
+    try:
+        count = int(tool_input.get("count", 5))
+    except (TypeError, ValueError):
+        count = 5
+    result = mail.list_unread(count)
+    _add_card({"type": "email", "title": "Unread mail", "text": result})
+    return result
+
+
+def _mail_search(tool_input: dict) -> str:
+    query = str(tool_input.get("query", ""))
+    result = mail.search_mail(query)
+    _add_card({"type": "email", "title": f"Mail: {query.strip()}" if query.strip() else "Mail", "text": result})
+    return result
+
+
+def _send_email(tool_input: dict) -> str:
+    return mail.send_email(
+        str(tool_input.get("to", "")),
+        str(tool_input.get("subject", "")),
+        str(tool_input.get("body", "")),
+    )
+
+
+# --- messages ---
+def _recent_messages(tool_input: dict) -> str:
+    try:
+        count = int(tool_input.get("count", 10))
+    except (TypeError, ValueError):
+        count = 10
+    result = messages.recent_messages(count)
+    _add_card({"type": "messages", "title": "Recent messages", "text": result})
+    return result
+
+
+def _send_message(tool_input: dict) -> str:
+    return messages.send_message(str(tool_input.get("to", "")), str(tool_input.get("text", "")))
+
+
 def build_tools(cfg: Config) -> dict[str, Tool]:
     allowlist = cfg.resolved_filesystem_allowlist()
 
@@ -558,6 +599,53 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
             ),
             parameters={"question": "what to find out about the screen, e.g. 'what does this error say?'"},
             handler=_look_at_screen,
+        ),
+        # --- mail (Apple Mail) ---
+        "check_email": Tool(
+            name="check_email",
+            description="Summarize the user's unread email (sender + subject) from Apple Mail.",
+            parameters={"count": "integer, how many to show (default 5)"},
+            handler=_mail_unread,
+        ),
+        "search_email": Tool(
+            name="search_email",
+            description="Search the Mail inbox by subject and list matching messages.",
+            parameters={"query": "string to look for in subjects"},
+            handler=_mail_search,
+        ),
+        "send_email": Tool(
+            name="send_email",
+            description=(
+                "Compose and send an email via Apple Mail. Requires spoken/typed "
+                "confirmation before it sends."
+            ),
+            parameters={
+                "to": "recipient email address",
+                "subject": "string, the subject line",
+                "body": "string, the message body",
+            },
+            handler=_send_email,
+            confirm_key="send_message",
+        ),
+        # --- messages (iMessage/SMS) ---
+        "read_messages": Tool(
+            name="read_messages",
+            description="Read the most recent text messages (iMessage/SMS) with sender and time.",
+            parameters={"count": "integer, how many recent messages (default 10)"},
+            handler=_recent_messages,
+        ),
+        "send_message": Tool(
+            name="send_message",
+            description=(
+                "Send an iMessage/SMS to a phone number, email, or contact handle. "
+                "Requires spoken/typed confirmation before it sends."
+            ),
+            parameters={
+                "to": "phone number, email, or handle",
+                "text": "string, the message to send",
+            },
+            handler=_send_message,
+            confirm_key="send_message",
         ),
     }
 

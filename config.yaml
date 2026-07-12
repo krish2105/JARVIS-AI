@@ -18,6 +18,7 @@ require_confirmation_for:
 - run_shell_command
 - Write
 - browser_action
+- send_message
 hud:
   host: 127.0.0.1
   port: 8765

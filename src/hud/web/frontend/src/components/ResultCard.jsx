@@ -5,6 +5,8 @@ const META = {
   agenda: { icon: "▦", accent: "ag" },
   music: { icon: "♪", accent: "mu" },
   screen: { icon: "▢", accent: "sc" },
+  email: { icon: "✉", accent: "em" },
+  messages: { icon: "💬", accent: "ms" },
 };
 
 export default function ResultCard({ card }) {
