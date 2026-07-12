@@ -309,6 +309,12 @@ def _music_play_query(tool_input: dict) -> str:
     return music.play_playlist(str(tool_input.get("playlist", "")))
 
 
+def _look_at_screen(tool_input: dict) -> str:
+    from src.brain.skills.vision import look_at_screen
+
+    return look_at_screen(str(tool_input.get("question", "")))
+
+
 def build_tools(cfg: Config) -> dict[str, Tool]:
     allowlist = cfg.resolved_filesystem_allowlist()
 
@@ -507,6 +513,17 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
         "remove_routine": Tool(
             name="remove_routine", description="Delete a routine by its id.",
             parameters={"id": "the routine id (integer)"}, handler=_remove_routine,
+        ),
+        # --- vision ---
+        "look_at_screen": Tool(
+            name="look_at_screen",
+            description=(
+                "Take a screenshot and answer a question about what's on screen "
+                "using a local vision model. Use when the user asks what's on their "
+                "screen, to read/explain something visible, or 'look at this'."
+            ),
+            parameters={"question": "what to find out about the screen, e.g. 'what does this error say?'"},
+            handler=_look_at_screen,
         ),
     }
 

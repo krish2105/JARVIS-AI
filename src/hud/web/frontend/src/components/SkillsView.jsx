@@ -5,6 +5,8 @@ const SKILLS = [
   { name: "Calendar", desc: "Read your events and add new ones to the macOS Calendar.", risk: "safe" },
   { name: "System control", desc: "Volume, mute, dark mode, open apps, lock the screen.", risk: "safe" },
   { name: "Music", desc: "Play/pause, skip, and see what's playing in Apple Music.", risk: "safe" },
+  { name: "Look at screen", desc: "Take a screenshot and answer questions about it with a local vision model.", risk: "safe" },
+  { name: "Routines", desc: "Run a spoken briefing at a set time each day.", risk: "safe" },
   { name: "Memory", desc: "Remember and recall facts about you across restarts.", risk: "safe" },
   { name: "Web search", desc: "Search the web and summarize the top results.", risk: "safe" },
   { name: "Read files", desc: "Read text files inside your allowed folders.", risk: "safe" },
