@@ -60,6 +60,26 @@ def main() -> None:
         resizable=True,
     )
 
+    # Ambient desktop orb: a small frameless, always-on-top, transparent,
+    # draggable widget that mirrors Jarvis's state (index.html#orb). Best-effort
+    # — if this particular window can't be created, the main HUD still runs.
+    try:
+        webview.create_window(
+            "Jarvis Orb",
+            url=str(WEB_DIR / "index.html") + "#orb",
+            width=112,
+            height=112,
+            x=1000,
+            y=80,
+            frameless=True,
+            on_top=True,
+            easy_drag=True,
+            transparent=True,
+            resizable=False,
+        )
+    except Exception:  # noqa: BLE001
+        logging.exception("could not create the ambient orb window")
+
     webview.start(hud.run_in_background_thread, gui="cocoa", debug=False)
 
 

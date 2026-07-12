@@ -214,6 +214,34 @@ h4 { margin: 0; }
 /* legacy status view (kept in case) */
 .status-view, .ring-wrap, .ring-bg, .ring-fg, .core, .label, .caption, .hint { }
 
+/* ---- ambient desktop orb (index.html#orb) ---- */
+body.orb-mode, body.orb-mode #root { background: transparent !important; }
+.orb-widget {
+  width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center;
+  -webkit-app-region: drag; cursor: grab; user-select: none;
+}
+.ow-orb { position: relative; width: 78px; height: 78px; transition: transform 80ms linear; }
+.ow-orb .orb-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 90deg, var(--tone-c), rgba(0,0,0,0) 62%, var(--tone-c));
+  -webkit-mask: radial-gradient(circle, transparent 32px, #000 33px);
+  mask: radial-gradient(circle, transparent 32px, #000 33px);
+}
+.ow-orb.on .orb-ring { animation: spin 3s linear infinite; }
+.ow-orb.idle .orb-ring { opacity: .35; }
+.ow-orb .orb-core {
+  position: absolute; inset: 16px; border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #fff, var(--tone-c) 44%, var(--tone-d) 80%, #06202a);
+  box-shadow: 0 0 26px -2px var(--tone-c), inset 0 -6px 14px rgba(0,0,0,.4);
+}
+.ow-orb.idle .orb-core { filter: saturate(.5) brightness(.7); }
+/* per-state colour tokens for the orb */
+.orb-widget { --tone-c: var(--cyan); --tone-d: var(--cyan-deep); }
+.orb-widget.tone-listen { --tone-c: var(--cyan); --tone-d: var(--cyan-deep); }
+.orb-widget.tone-think { --tone-c: var(--amber); --tone-d: #b5760f; }
+.orb-widget.tone-speak { --tone-c: var(--good); --tone-d: #2ea877; }
+.orb-widget.tone-approve { --tone-c: var(--crit); --tone-d: #b53f3f; }
+
 /* ---- onboarding ---- */
 .ob-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
   background: rgba(5,8,13,.72); backdrop-filter: blur(4px); padding: 24px; }
