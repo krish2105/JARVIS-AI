@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { useJarvis } from "../jarvisClient.jsx";
+import Markdown from "./Markdown.jsx";
+import CopyButton from "./CopyButton.jsx";
+import { ResultCards } from "./ResultCard.jsx";
 
 const STATE_LABEL = {
   idle: "IDLE",
@@ -23,7 +26,16 @@ export default function ConversationView() {
   const [turns, setTurns] = useState([]);
   const [decided, setDecided] = useState(null);
   const [levels, setLevels] = useState(() => Array(WAVE_BARS).fill(0));
+  const [cards, setCards] = useState([]);
   const state = status.state || "idle";
+
+  // Keep the current turn's result cards visible until the next turn begins.
+  useEffect(() => {
+    if (Array.isArray(status.cards) && status.cards.length) setCards(status.cards);
+  }, [status.cards]);
+  useEffect(() => {
+    if (state === "listening" || state === "wake_detected") setCards([]);
+  }, [state]);
 
   // Feed the live mic level into a scrolling waveform buffer while listening.
   useEffect(() => {
@@ -118,7 +130,10 @@ export default function ConversationView() {
         {turns.map((t, i) => (
           <div key={i} className="pair">
             <div className="msg you">{t.transcript}</div>
-            <div className="msg jarvis">{t.reply}</div>
+            <div className="msg jarvis">
+              <Markdown>{t.reply}</Markdown>
+              <div className="msg-act"><CopyButton text={t.reply} /></div>
+            </div>
           </div>
         ))}
         {showLive && (
@@ -126,11 +141,16 @@ export default function ConversationView() {
             {liveHeard && <div className="msg you">{liveHeard}</div>}
             {liveReply && (
               <div className="msg jarvis">
-                {liveReply}
+                <Markdown>{liveReply}</Markdown>
                 {state === "speaking" && <span className="caret" />}
+                {state !== "speaking" && <div className="msg-act"><CopyButton text={liveReply} /></div>}
               </div>
             )}
+            <ResultCards cards={cards} />
           </div>
+        )}
+        {!showLive && cards.length > 0 && (
+          <div className="pair"><ResultCards cards={cards} /></div>
         )}
         {turns.length === 0 && !showLive && (
           <div className="empty">No conversation yet. Say “Hey Jarvis” to begin.</div>

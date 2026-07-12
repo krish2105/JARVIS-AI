@@ -35,7 +35,7 @@ from src.audio.wake_word import WakeWordListener
 from src.brain.agent import JarvisSession, run_turn
 from src.brain.local_llm import LocalLLM
 from src.brain.memory import seed_default_memories
-from src.brain.tools import get_routine_service, set_timer_notifier
+from src.brain.tools import get_routine_service, pop_cards, set_timer_notifier
 from src.core.approvals import approvals
 from src.core.cancellation import CancellationToken
 from src.core.state_machine import IllegalTransition, VoiceState, VoiceStateMachine
@@ -201,6 +201,7 @@ def run_forever(
             return
         try:
             acc = {"t": ""}
+            pop_cards()  # discard any stale cards from a prior turn
 
             def on_tok(tok: str) -> None:
                 acc["t"] += tok
@@ -210,7 +211,7 @@ def run_forever(
             # Q&A and safe tools still work.
             reply = _run_turn(text, JarvisSession(), cfg, confirm_fn=lambda *a: False, on_token=on_tok)
             reporter.send_message({"type": "command_stream", "id": cmd_id,
-                                   "reply": reply or "(no answer)", "done": True})
+                                   "reply": reply or "(no answer)", "cards": pop_cards(), "done": True})
         except Exception:  # noqa: BLE001
             logger.exception("command failed")
             reporter.send_message({"type": "command_stream", "id": cmd_id,
@@ -315,6 +316,7 @@ def run_forever(
 
                 cancel = CancellationToken()
                 go(VoiceState.THINKING, transcript=transcript)
+                pop_cards()  # discard any stale cards from a prior turn
 
                 if cfg.audio.full_duplex:
                     # Full-duplex: mic stays open through playback (one duplex
@@ -348,6 +350,10 @@ def run_forever(
                     barged = barge.triggered
 
                 _append_transcript(transcript, reply)
+
+                cards = pop_cards()
+                if cards and state_callback and not cancel.cancelled:
+                    state_callback("speaking", {"transcript": transcript, "reply": reply, "cards": cards})
 
                 if barged or cancel.cancelled:
                     sm.barge_in(source="wake", reason="user interrupted")

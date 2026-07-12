@@ -17,6 +17,7 @@ import logging
 import os
 import shlex
 import subprocess
+import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,25 @@ LOG_DIR = Path.home() / "Library" / "Logs"
 LOG_PATH = LOG_DIR / "jarvis.log"
 TOOL_CALLS_PATH = LOG_DIR / "jarvis_tool_calls.jsonl"
 _logger = logging.getLogger("jarvis.tools")
+
+# Result cards: card-worthy tools (weather, agenda, now-playing, screen) drop a
+# structured card here as they run. The pipeline pops them after each turn and
+# ships them to the HUD, which renders a glanceable card instead of plain text.
+_pending_cards: list[dict] = []
+_cards_lock = threading.Lock()
+
+
+def _add_card(card: dict) -> None:
+    with _cards_lock:
+        _pending_cards.append(card)
+
+
+def pop_cards() -> list[dict]:
+    """Return and clear the cards produced since the last pop (thread-safe)."""
+    with _cards_lock:
+        cards = list(_pending_cards)
+        _pending_cards.clear()
+        return cards
 
 
 def _ensure_logging() -> None:
@@ -256,7 +276,10 @@ def _cancel_timer(tool_input: dict) -> str:
 
 
 def _get_weather(tool_input: dict) -> str:
-    return get_weather(str(tool_input.get("location", "")))
+    location = str(tool_input.get("location", ""))
+    result = get_weather(location)
+    _add_card({"type": "weather", "title": location.strip() or "Weather", "text": result})
+    return result
 
 
 def _create_reminder(tool_input: dict) -> str:
@@ -272,7 +295,9 @@ def _list_events(tool_input: dict) -> str:
         days = int(tool_input.get("days", 1))
     except (TypeError, ValueError):
         days = 1
-    return list_events(days)
+    result = list_events(days)
+    _add_card({"type": "agenda", "title": "Agenda" if days <= 1 else f"Next {days} days", "text": result})
+    return result
 
 
 def _create_event(tool_input: dict) -> str:
@@ -312,7 +337,16 @@ def _music_play_query(tool_input: dict) -> str:
 def _look_at_screen(tool_input: dict) -> str:
     from src.brain.skills.vision import look_at_screen
 
-    return look_at_screen(str(tool_input.get("question", "")))
+    question = str(tool_input.get("question", ""))
+    result = look_at_screen(question)
+    _add_card({"type": "screen", "title": question.strip() or "On your screen", "text": result})
+    return result
+
+
+def _music_current(_tool_input: dict) -> str:
+    result = music.current_track()
+    _add_card({"type": "music", "title": "Now playing", "text": result})
+    return result
 
 
 def build_tools(cfg: Config) -> dict[str, Tool]:
@@ -487,7 +521,7 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
         ),
         "music_current": Tool(
             name="music_current", description="Say what track is currently playing.",
-            parameters={}, handler=_system(music.current_track),
+            parameters={}, handler=_music_current,
         ),
         "music_play_playlist": Tool(
             name="music_play_playlist", description="Play a named Apple Music playlist.",
