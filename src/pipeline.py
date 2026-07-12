@@ -168,14 +168,17 @@ def run_forever(
             logger.warning("illegal transition %s -> %s; forcing", sm.state.value, state.value)
             sm.force(state, reason="forced after illegal transition")
 
-    def make_on_token(speaker: StreamingSpeaker, transcript: str):
-        """Build the streaming sink: on the first token, flip the HUD to
-        SPEAKING; every token feeds the incremental TTS."""
+    def make_on_token(speaker: StreamingSpeaker, transcript: str, barge: BargeInWatcher):
+        """Build the streaming sink. On the FIRST token we (1) close the
+        barge-in mic so the speaker has the audio device to itself — two
+        concurrent streams (mic in + TTS out) garble playback — and (2) flip
+        the HUD to SPEAKING. Every token then feeds the incremental TTS."""
         fired = {"v": False}
 
         def on_token(tok: str) -> None:
             if not fired["v"]:
                 fired["v"] = True
+                barge.stop()  # release the mic BEFORE any audio plays
                 go(VoiceState.SPEAKING, transcript=transcript)
             speaker.feed(tok)
 
@@ -224,14 +227,15 @@ def run_forever(
 
                 reply = run_turn(
                     transcript, session, cfg, confirm_fn=confirm_fn,
-                    cancel=cancel, on_token=make_on_token(speaker, transcript),
+                    cancel=cancel, on_token=make_on_token(speaker, transcript, barge),
                 )
                 speaker.finish()
-                barge.stop()
+                barge.stop()  # idempotent — already stopped when speaking began
                 _append_transcript(transcript, reply)
 
                 # A reply that never streamed (e.g. the tool-budget message)
-                # still gets spoken, unless the turn was interrupted.
+                # still gets spoken, unless the turn was interrupted. The mic is
+                # already closed (barge.stop above) so playback is clean.
                 if reply and not cancel.cancelled and not speaker.spoken:
                     speak(reply, voice=cfg.voice, should_stop=lambda c=cancel: c.cancelled)
 
