@@ -208,12 +208,12 @@ def run_forever(
             logger.warning("illegal transition %s -> %s; forcing", sm.state.value, state.value)
             sm.force(state, reason="forced after illegal transition")
 
-    def make_on_token(speaker: StreamingSpeaker, transcript: str, barge: BargeInWatcher):
-        """Build the streaming sink. On the FIRST token we (1) close the
-        barge-in mic so the speaker has the audio device to itself — two
-        concurrent streams (mic in + TTS out) garble playback — and (2) flip
-        the HUD to SPEAKING. Every token feeds the incremental TTS AND streams
-        the growing reply text to the HUD so it types out live as it's spoken."""
+    def make_on_token(speaker, transcript: str, on_first=None):
+        """Build the streaming sink. On the FIRST token we run `on_first` (the
+        half-duplex path closes the barge-in mic here so playback is clean; the
+        full-duplex path keeps it open) and flip the HUD to SPEAKING. Every
+        token feeds the incremental TTS AND streams the growing reply text to
+        the HUD so it types out live as it's spoken."""
         fired = {"v": False}
         acc = {"text": ""}
 
@@ -221,7 +221,8 @@ def run_forever(
             acc["text"] += tok
             if not fired["v"]:
                 fired["v"] = True
-                barge.stop()  # release the mic BEFORE any audio plays
+                if on_first is not None:
+                    on_first()
                 go(VoiceState.SPEAKING, transcript=transcript, reply=acc["text"])
             elif state_callback:
                 # Direct partial update (not a state transition) so the reply
@@ -269,28 +270,40 @@ def run_forever(
                 cancel = CancellationToken()
                 go(VoiceState.THINKING, transcript=transcript)
 
-                # Barge-in: listen for "Hey Jarvis" while we think + speak,
-                # on its OWN model (never the main listen loop's).
-                barge = BargeInWatcher(barge_wake, cancel)
-                barge.start()
-                # Incremental TTS: speak sentences as the model streams them.
-                speaker = StreamingSpeaker(cfg.voice, cancel=cancel)
+                if cfg.audio.full_duplex:
+                    # Full-duplex: mic stays open through playback (one duplex
+                    # stream + echo reduction), so you can interrupt mid-speech.
+                    from src.audio.duplex import DuplexSpeaker
+                    speaker = DuplexSpeaker(cfg.voice, barge_wake, cancel)
+                    speaker.start()
+                    reply = run_turn(
+                        transcript, session, cfg, confirm_fn=confirm_fn,
+                        cancel=cancel, on_token=make_on_token(speaker, transcript),
+                    )
+                    if reply and not speaker.spoken and not cancel.cancelled:
+                        go(VoiceState.SPEAKING, transcript=transcript, reply=reply)
+                        speaker.feed(reply)
+                    speaker.finish()
+                    barged = speaker.interrupted
+                else:
+                    # Half-duplex (default): the barge mic closes the instant
+                    # speaking starts so playback has the device to itself.
+                    barge = BargeInWatcher(barge_wake, cancel)
+                    barge.start()
+                    speaker = StreamingSpeaker(cfg.voice, cancel=cancel)
+                    reply = run_turn(
+                        transcript, session, cfg, confirm_fn=confirm_fn,
+                        cancel=cancel, on_token=make_on_token(speaker, transcript, on_first=barge.stop),
+                    )
+                    speaker.finish()
+                    barge.stop()  # idempotent — already stopped when speaking began
+                    if reply and not cancel.cancelled and not speaker.spoken:
+                        speak(reply, voice=cfg.voice, should_stop=lambda c=cancel: c.cancelled)
+                    barged = barge.triggered
 
-                reply = run_turn(
-                    transcript, session, cfg, confirm_fn=confirm_fn,
-                    cancel=cancel, on_token=make_on_token(speaker, transcript, barge),
-                )
-                speaker.finish()
-                barge.stop()  # idempotent — already stopped when speaking began
                 _append_transcript(transcript, reply)
 
-                # A reply that never streamed (e.g. the tool-budget message)
-                # still gets spoken, unless the turn was interrupted. The mic is
-                # already closed (barge.stop above) so playback is clean.
-                if reply and not cancel.cancelled and not speaker.spoken:
-                    speak(reply, voice=cfg.voice, should_stop=lambda c=cancel: c.cancelled)
-
-                if barge.triggered or cancel.cancelled:
+                if barged or cancel.cancelled:
                     sm.barge_in(source="wake", reason="user interrupted")
                     continue  # loop: LISTENING again, capture the new command
 

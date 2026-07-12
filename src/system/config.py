@@ -48,6 +48,10 @@ class AudioConfig:
     vad_silence_ms: int = 700
     max_record_seconds: int = 15
     wake_word_sensitivity: float = 0.6
+    # Experimental: keep the mic open (one duplex stream + echo cancellation)
+    # while Jarvis speaks, so you can interrupt mid-sentence by saying "Hey
+    # Jarvis" again. Off by default — the clean half-duplex path is the default.
+    full_duplex: bool = False
 
 
 @dataclass
@@ -113,6 +117,7 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
             vad_silence_ms=audio_raw.get("vad_silence_ms", 700),
             max_record_seconds=audio_raw.get("max_record_seconds", 15),
             wake_word_sensitivity=audio_raw.get("wake_word_sensitivity", 0.6),
+            full_duplex=bool(audio_raw.get("full_duplex", False)),
         ),
         filesystem_allowlist=raw.get("filesystem_allowlist", ["."]),
         require_confirmation_for=raw.get("require_confirmation_for", []),

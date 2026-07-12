@@ -28,6 +28,7 @@ _EDITABLE_CONFIG_PATHS = {
     "audio.wake_word_sensitivity",
     "audio.vad_silence_ms",
     "audio.max_record_seconds",
+    "audio.full_duplex",
     "filesystem_allowlist",
     "require_confirmation_for",
     "onboarded",
