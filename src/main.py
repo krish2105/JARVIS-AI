@@ -45,13 +45,35 @@ from src.system.config import load_config
 WEB_DIR = Path(__file__).resolve().parent / "hud" / "web" / "dist"
 
 
+class OrbApi:
+    """Exposed to the orb window's JS as window.pywebview.api. Clicking the orb
+    calls toggle_main() to show/hide the main HUD window."""
+
+    def __init__(self) -> None:
+        self.main = None
+        self._hidden = False
+
+    def toggle_main(self) -> None:
+        if self.main is None:
+            return
+        try:
+            if self._hidden:
+                self.main.show()
+            else:
+                self.main.hide()
+            self._hidden = not self._hidden
+        except Exception:  # noqa: BLE001
+            logging.exception("toggle_main failed")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     cfg = load_config()
 
     hud = HudServer(cfg)
+    api = OrbApi()
 
-    webview.create_window(
+    main_window = webview.create_window(
         "Jarvis",
         url=str(WEB_DIR / "index.html"),
         width=460,
@@ -59,10 +81,12 @@ def main() -> None:
         min_size=(360, 480),
         resizable=True,
     )
+    api.main = main_window
 
     # Ambient desktop orb: a small frameless, always-on-top, transparent,
-    # draggable widget that mirrors Jarvis's state (index.html#orb). Best-effort
-    # — if this particular window can't be created, the main HUD still runs.
+    # draggable widget that mirrors Jarvis's state (index.html#orb) and toggles
+    # the main window when clicked. Best-effort — if this window can't be
+    # created, the main HUD still runs.
     try:
         webview.create_window(
             "Jarvis Orb",
@@ -76,6 +100,7 @@ def main() -> None:
             easy_drag=True,
             transparent=True,
             resizable=False,
+            js_api=api,
         )
     except Exception:  # noqa: BLE001
         logging.exception("could not create the ambient orb window")

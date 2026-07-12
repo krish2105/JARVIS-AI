@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.audio.barge_in import BargeInWatcher
+from src.audio.coordinator import mic_released
 from src.audio.recorder import Recorder
 from src.audio.streaming_speaker import StreamingSpeaker
 from src.audio.stt import transcribe
@@ -33,11 +34,12 @@ from src.audio.wake_word import WakeWordListener
 from src.brain.agent import JarvisSession, run_turn
 from src.brain.local_llm import LocalLLM
 from src.brain.memory import seed_default_memories
-from src.brain.tools import set_timer_notifier
+from src.brain.tools import get_routine_service, set_timer_notifier
 from src.core.approvals import approvals
 from src.core.cancellation import CancellationToken
 from src.core.state_machine import IllegalTransition, VoiceState, VoiceStateMachine
 from src.system.config import Config, load_config
+from src.system.notify import notify
 from src.system.redaction import redact_secrets, rotating_handler
 
 LOG_DIR = Path.home() / "Library" / "Logs"
@@ -136,8 +138,46 @@ def run_forever(
     cfg = cfg or load_config()
 
     seed_default_memories()
-    # Timers announce themselves aloud when they fire.
-    set_timer_notifier(lambda msg: speak(msg, voice=cfg.voice))
+
+    # One lock serializes anything that runs the model / plays audio, so a
+    # timer or scheduled routine never collides with a live conversation.
+    turn_lock = threading.Lock()
+
+    def _speak_announcement(text: str, title: str) -> None:
+        notify(title, text[:150])
+        with mic_released():  # pause the wake-word mic so playback is clean
+            speak(text, voice=cfg.voice)
+
+    def announce_locked(text: str, title: str) -> None:
+        got = turn_lock.acquire(timeout=30)  # wait for any active turn to finish
+        try:
+            _speak_announcement(text, title)
+        finally:
+            if got:
+                turn_lock.release()
+
+    # Timers announce themselves aloud + as a notification when they fire.
+    set_timer_notifier(lambda msg: announce_locked(msg, "Timer"))
+
+    def routine_trigger(prompt: str) -> bool:
+        if not turn_lock.acquire(timeout=1):
+            return False  # a conversation is in progress; retry on the next tick
+        try:
+            # Auto-deny confirmations: a routine runs unattended, so it must not
+            # perform any action that would need a spoken "confirm".
+            reply = run_turn(prompt, JarvisSession(), cfg, confirm_fn=lambda *a: False)
+            if reply:
+                _speak_announcement(reply, "Jarvis")
+            return True
+        except Exception:  # noqa: BLE001
+            logger.exception("routine failed")
+            return True  # don't retry a failing routine in a tight loop
+        finally:
+            turn_lock.release()
+
+    routines = get_routine_service()
+    routines.set_trigger(routine_trigger)
+    routines.start()
 
     wake = WakeWordListener(cfg)
     # A SEPARATE wake model for barge-in. openWakeWord's model is not
@@ -208,6 +248,7 @@ def run_forever(
             wake.listen_once()
             go(VoiceState.WAKE_DETECTED)
             audio = None  # after a barge-in, holds the user's next utterance
+            turn_lock.acquire()  # block routines/timers for the whole turn
             while True:  # turn chain: a barge-in loops back WITHOUT re-waking
                 sm.start_turn()
                 go(VoiceState.LISTENING)
@@ -255,6 +296,7 @@ def run_forever(
 
                 go(VoiceState.IDLE)
                 break
+            turn_lock.release()  # turn done — routines/timers may run again
     finally:
         wake.close()
         barge_wake.close()

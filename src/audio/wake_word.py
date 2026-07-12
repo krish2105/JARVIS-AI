@@ -55,39 +55,48 @@ class WakeWordListener:
         return None
 
     def listen_once(self, on_frame: Callable[[], None] | None = None) -> None:
-        """Blocks until the wake word is detected once, then returns."""
-        with sd.InputStream(
-            samplerate=self.sample_rate,
-            blocksize=self.frame_length,
-            channels=1,
-            dtype="int16",
-        ) as stream:
-            window_max = 0.0
-            frames = 0
-            while True:
-                pcm, _ = stream.read(self.frame_length)
-                pcm = pcm.reshape(-1)
-                scores = self._model.predict(pcm)
-                if self._matched_score(scores) is not None:
-                    self._model.reset()
-                    return
-                # Diagnostic: periodically log the best wake-word score so we
-                # can tell whether the mic is delivering audio and how close
-                # the user's "Hey Jarvis" gets to the threshold. Only logs when
-                # there's real activity, so idle silence doesn't spam the log.
-                best = max((v for n, v in scores.items() if self.wake_word in n.lower()), default=0.0)
-                window_max = max(window_max, best)
-                frames += 1
-                if frames >= 50:  # ~4s
-                    if window_max > 0.05:
-                        logger.info(
-                            "wake: best hey_jarvis score %.3f (threshold %.2f)",
-                            window_max, self.threshold,
-                        )
-                    window_max = 0.0
-                    frames = 0
-                if on_frame:
-                    on_frame()
+        """Blocks until the wake word is detected once, then returns. Releases
+        the mic when an announcement (timer/routine) asks to speak, then
+        reopens it — see src/audio/coordinator.py."""
+        from src.audio.coordinator import mic_coordinator
+
+        while True:  # outer loop: reopen the stream after an announcement
+            with sd.InputStream(
+                samplerate=self.sample_rate,
+                blocksize=self.frame_length,
+                channels=1,
+                dtype="int16",
+            ) as stream:
+                window_max = 0.0
+                frames = 0
+                while True:
+                    if mic_coordinator.should_pause():
+                        break  # close the stream so an announcement can play
+                    pcm, _ = stream.read(self.frame_length)
+                    pcm = pcm.reshape(-1)
+                    scores = self._model.predict(pcm)
+                    if self._matched_score(scores) is not None:
+                        self._model.reset()
+                        return
+                    # Diagnostic: periodically log the best wake-word score.
+                    # Only logs when there's real activity, so idle silence
+                    # doesn't spam the log.
+                    best = max((v for n, v in scores.items() if self.wake_word in n.lower()), default=0.0)
+                    window_max = max(window_max, best)
+                    frames += 1
+                    if frames >= 50:  # ~4s
+                        if window_max > 0.05:
+                            logger.info(
+                                "wake: best hey_jarvis score %.3f (threshold %.2f)",
+                                window_max, self.threshold,
+                            )
+                        window_max = 0.0
+                        frames = 0
+                    if on_frame:
+                        on_frame()
+            # Stream closed for an announcement: mark released and wait.
+            self._model.reset()
+            mic_coordinator.wait_while_paused()
 
     def detect_until(self, stop_event) -> bool:
         """Listen for the wake word until it is detected (return True) or

@@ -26,6 +26,7 @@ from src.brain.memory import memory_dispatch
 from src.brain.memory_db import MemoryDB
 from src.brain.skills import music, system_control
 from src.brain.skills.apple import create_event, create_reminder, list_events, list_reminders
+from src.brain.skills.routines import RoutineService
 from src.brain.skills.timers import TimerService
 from src.brain.skills.weather import get_weather
 from src.brain.tool_types import Tool
@@ -199,6 +200,30 @@ _timer_service = TimerService()
 
 def set_timer_notifier(notify) -> None:
     _timer_service.notify = notify
+
+
+# One routine service for the whole process. The pipeline wires its trigger.
+_routine_service = RoutineService()
+
+
+def get_routine_service() -> RoutineService:
+    return _routine_service
+
+
+def _add_routine(tool_input: dict) -> str:
+    return _routine_service.add(str(tool_input.get("time", "")), str(tool_input.get("prompt", "")))
+
+
+def _list_routines(_tool_input: dict) -> str:
+    return _routine_service.listing()
+
+
+def _remove_routine(tool_input: dict) -> str:
+    try:
+        rid = int(tool_input.get("id"))
+    except (TypeError, ValueError):
+        return "Error: give the routine id to remove."
+    return _routine_service.remove(rid)
 
 
 def _set_timer(tool_input: dict) -> str:
@@ -461,6 +486,27 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
         "music_play_playlist": Tool(
             name="music_play_playlist", description="Play a named Apple Music playlist.",
             parameters={"playlist": "string, the playlist name"}, handler=_music_play_query,
+        ),
+        # --- routines ---
+        "add_routine": Tool(
+            name="add_routine",
+            description=(
+                "Schedule a daily routine: a request Jarvis runs and speaks at a set "
+                "time every day, e.g. a morning briefing. Time is 24-hour HH:MM."
+            ),
+            parameters={
+                "time": "string 'HH:MM' (24-hour)",
+                "prompt": "what to do, e.g. 'tell me the weather and today's calendar'",
+            },
+            handler=_add_routine,
+        ),
+        "list_routines": Tool(
+            name="list_routines", description="List the user's scheduled daily routines.",
+            parameters={}, handler=_list_routines,
+        ),
+        "remove_routine": Tool(
+            name="remove_routine", description="Delete a routine by its id.",
+            parameters={"id": "the routine id (integer)"}, handler=_remove_routine,
         ),
     }
 
