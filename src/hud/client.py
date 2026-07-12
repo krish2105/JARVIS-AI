@@ -72,4 +72,4 @@ class HudStateReporter:
             if data.get("type") == "approval_decision":
                 approvals.resolve(data.get("id"), bool(data.get("approved")))
             elif data.get("type") == "command" and self._on_command is not None:
-                self._on_command(data.get("id"), data.get("text", ""))
+                self._on_command(data.get("id"), data.get("text", ""), data.get("context") or {})

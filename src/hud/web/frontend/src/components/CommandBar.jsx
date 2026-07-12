@@ -3,6 +3,7 @@ import { useJarvis } from "../jarvisClient.jsx";
 import Markdown from "./Markdown.jsx";
 import CopyButton from "./CopyButton.jsx";
 import { ResultCards } from "./ResultCard.jsx";
+import ContextBar from "./ContextBar.jsx";
 
 // Spotlight-style command bar: summon anywhere, type or talk, answer streams
 // inline. Rendered in its own transparent always-on-top window (index.html#command).
@@ -13,7 +14,13 @@ export default function CommandBar() {
   const [cards, setCards] = useState([]);
   const [busy, setBusy] = useState(false);
   const [asked, setAsked] = useState("");
+  const [attachments, setAttachments] = useState({});
   const inputRef = useRef(null);
+
+  function toggle(key) {
+    setAttachments((a) => ({ ...a, [key]: !a[key] }));
+    inputRef.current?.focus();
+  }
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -27,8 +34,10 @@ export default function CommandBar() {
     }
   }
 
-  function run(text) {
-    if (!text || busy) return;
+  function run(text, ctx) {
+    const context = ctx || attachments;
+    // With the screen attached you can send an empty box ("what's this?").
+    if ((!text && !context.screen) || busy) return;
     setAsked(text);
     setReply("");
     setCards([]);
@@ -39,7 +48,7 @@ export default function CommandBar() {
         if (Array.isArray(chunk.cards)) setCards(chunk.cards);
         setBusy(false);
       }
-    });
+    }, context);
   }
 
   function submit(e) {
@@ -48,7 +57,7 @@ export default function CommandBar() {
   }
 
   function retry() {
-    if (asked) run(asked);
+    if (asked || attachments.screen) run(asked);
   }
 
   function onKeyDown(e) {
@@ -74,12 +83,15 @@ export default function CommandBar() {
           className="cmd-input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder={connected ? "Ask Jarvis…" : "Connecting…"}
+          placeholder={
+            !connected ? "Connecting…" : attachments.screen ? "Ask about your screen…" : "Ask Jarvis…"
+          }
           spellCheck={false}
           autoComplete="off"
         />
         <kbd className="cmd-kbd">{busy ? "…" : "⏎"}</kbd>
       </form>
+      <ContextBar attachments={attachments} onToggle={toggle} />
       {(reply || busy) && (
         <div className="cmd-result">
           {reply ? <Markdown>{reply}</Markdown> : "Thinking…"}

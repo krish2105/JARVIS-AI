@@ -84,11 +84,12 @@ export function JarvisProvider({ children }) {
     }
   }, []);
 
-  // Submit a typed command-bar query; onChunk({reply, done}) fires as it streams.
-  const sendCommand = useCallback((text, onChunk) => {
+  // Submit a typed command-bar query; onChunk({reply, done}) fires as it
+  // streams. `context` carries composer attachments (e.g. {screen: true}).
+  const sendCommand = useCallback((text, onChunk, context = {}) => {
     const id = Math.random().toString(36).slice(2);
     commandSubs.current.set(id, onChunk);
-    send({ type: "command", id, text });
+    send({ type: "command", id, text, context });
     return id;
   }, [send]);
 

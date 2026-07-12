@@ -192,8 +192,11 @@ def run_forever(
     routines.set_trigger(routine_trigger)
     routines.start()
 
-    def process_command(cmd_id: str, text: str) -> None:
-        """Run a typed command-bar query and stream the reply back to the HUD."""
+    def process_command(cmd_id: str, text: str, context: dict | None = None) -> None:
+        """Run a typed command-bar query and stream the reply back to the HUD.
+        `context` carries composer attachments — e.g. {"screen": True} routes
+        the question straight through the local vision model."""
+        context = context or {}
         reporter = state_callback
         if not turn_lock.acquire(timeout=30):
             reporter.send_message({"type": "command_stream", "id": cmd_id,
@@ -202,6 +205,19 @@ def run_forever(
         try:
             acc = {"t": ""}
             pop_cards()  # discard any stale cards from a prior turn
+
+            # Multimodal composer: "attach screen" answers with local vision,
+            # deterministically (no reliance on the 8B model choosing the tool).
+            if context.get("screen"):
+                from src.brain.skills.vision import look_at_screen
+
+                answer = look_at_screen(text or "What's on my screen?")
+                reporter.send_message({
+                    "type": "command_stream", "id": cmd_id, "reply": answer or "(no answer)",
+                    "cards": [{"type": "screen", "title": text.strip() or "On your screen", "text": answer}],
+                    "done": True,
+                })
+                return
 
             def on_tok(tok: str) -> None:
                 acc["t"] += tok
@@ -221,8 +237,8 @@ def run_forever(
 
     if state_callback is not None and hasattr(state_callback, "set_command_handler"):
         state_callback.set_command_handler(
-            lambda cmd_id, text: threading.Thread(
-                target=process_command, args=(cmd_id, text), daemon=True
+            lambda cmd_id, text, context=None: threading.Thread(
+                target=process_command, args=(cmd_id, text, context), daemon=True
             ).start()
         )
 

@@ -341,3 +341,17 @@ body.orb-mode, body.orb-mode #root { background: transparent !important; }
 .rc-ico { color: var(--accent, var(--cyan)); font-size: 15px; line-height: 1; }
 .rc-title { font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .rc-body { font-size: 13.5px; line-height: 1.5; color: var(--text); white-space: pre-wrap; }
+
+/* ── Context bar + multimodal composer (Phase 1.x) ──────────────── */
+.ctxbar { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 9px; padding: 0 2px; }
+.ctx-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted);
+  background: rgba(18,26,40,.55); border: 1px solid var(--line-soft); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+.ctx-ico { font-size: 11px; line-height: 1; opacity: .9; }
+.ctx-chip.toggle { cursor: pointer; transition: color .15s, border-color .15s, background .15s; }
+.ctx-chip.toggle:hover { color: var(--text); border-color: var(--line); }
+.ctx-chip.toggle.on { color: #cbe9ff; background: rgba(56,208,240,.14); border-color: var(--cyan-deep); }
+.ctx-chip.toggle.on .ctx-ico { color: var(--cyan); opacity: 1; }
+.ctx-chip.dotwrap { gap: 6px; }
+.ctx-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.ctx-dot.up { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.ctx-dot.down { background: var(--faint); }

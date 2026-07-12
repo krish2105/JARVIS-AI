@@ -109,6 +109,26 @@ def save_config(params: dict) -> dict:
     return {"ok": True, "config": load_config().redacted()}
 
 
+def context_snapshot(_params: dict) -> dict:
+    """Live context for the HUD's context bar: what Jarvis is working with
+    right now — the active model, how many memories it can draw on, and the
+    wake word. Cheap enough to poll while the command bar is open."""
+    try:
+        MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
+        memories = sum(
+            1 for f in MEMORY_ROOT.iterdir() if f.is_file() and not f.name.startswith(".")
+        )
+    except OSError:
+        memories = 0
+    cfg = load_config()
+    return {
+        "memories": memories,
+        "model": cfg.model.local.split("/")[-1],
+        "wake_word": cfg.wake_word,
+        "full_duplex": cfg.audio.full_duplex,
+    }
+
+
 HANDLERS = {
     "list_memories": list_memories,
     "read_memory": read_memory,
@@ -117,4 +137,5 @@ HANDLERS = {
     "list_tool_calls": list_tool_calls,
     "get_config": get_config,
     "save_config": save_config,
+    "context_snapshot": context_snapshot,
 }
