@@ -23,12 +23,30 @@ logger = logging.getLogger("jarvis.tts")
 
 MODEL_ID = "mlx-community/Kokoro-82M-bf16"
 SAMPLE_RATE = 24000  # Kokoro's native output rate
-_BLOCK = 2400  # 0.1s of audio per write — barge-in stops within ~100 ms
 
 _model = None
 _model_lock = threading.Lock()
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _output_rate() -> int:
+    """The output device's native sample rate. Playing at the device rate (and
+    resampling Kokoro's 24 kHz up to it in numpy) avoids the audio layer having
+    to resample a mismatched stream, which was garbling/'bursting' playback on
+    a 48 kHz device."""
+    try:
+        return int(sd.query_devices(kind="output")["default_samplerate"])
+    except Exception:  # noqa: BLE001
+        return SAMPLE_RATE
+
+
+def _resample(audio: np.ndarray, src: int, dst: int) -> np.ndarray:
+    if src == dst or audio.size == 0:
+        return audio
+    n = int(round(audio.size * dst / src))
+    x = np.linspace(0, audio.size, num=n, endpoint=False)
+    return np.interp(x, np.arange(audio.size), audio).astype(np.float32)
 
 
 def _get_model():
@@ -78,17 +96,20 @@ def speak(
 
     interrupted = False
     stopped = should_stop or (lambda: False)
+    out_rate = _output_rate()
+    block = max(512, out_rate // 10)  # ~0.1s per write
     try:
-        with sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
+        with sd.OutputStream(samplerate=out_rate, channels=1, dtype="float32") as stream:
             while True:
                 item = audio_queue.get()
                 if item is None:
                     break
-                for i in range(0, len(item), _BLOCK):
+                item = _resample(item, SAMPLE_RATE, out_rate)
+                for i in range(0, len(item), block):
                     if stopped():
                         interrupted = True
                         break
-                    stream.write(item[i : i + _BLOCK])
+                    stream.write(item[i : i + block])
                 if interrupted:
                     stream.abort()  # drop buffered audio immediately on barge-in
                     break
