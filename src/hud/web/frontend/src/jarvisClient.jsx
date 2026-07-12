@@ -66,8 +66,16 @@ export function JarvisProvider({ children }) {
     });
   }, []);
 
+  // Fire-and-forget message (e.g. an approval decision relayed to the pipeline).
+  const send = useCallback((obj) => {
+    const socket = wsRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(obj));
+    }
+  }, []);
+
   return (
-    <JarvisContext.Provider value={{ status, connected, request }}>
+    <JarvisContext.Provider value={{ status, connected, request, send }}>
       {children}
     </JarvisContext.Provider>
   );

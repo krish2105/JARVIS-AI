@@ -105,8 +105,13 @@ class HudServer:
                     payload = json.loads(message)
                 except json.JSONDecodeError:
                     continue
-                if payload.get("type") == "request":
+                ptype = payload.get("type")
+                if ptype == "request":
                     await self._handle_request(websocket, payload)
+                elif ptype == "approval_decision":
+                    # Relay the HUD's Approve/Deny to the pipeline WITHOUT
+                    # treating it as a status update.
+                    await self._relay(payload)
                 else:
                     await self._broadcast(payload)
         except websockets.exceptions.ConnectionClosed:
@@ -131,6 +136,17 @@ class HudServer:
             await websocket.send(json.dumps(response))
         except websockets.exceptions.ConnectionClosed:
             pass
+
+    async def _relay(self, payload: dict) -> None:
+        """Send a message to all clients WITHOUT recording it as the latest
+        state (used for approval decisions travelling HUD -> pipeline)."""
+        if not self._clients:
+            return
+        message = json.dumps(payload)
+        await asyncio.gather(
+            *(client.send(message) for client in list(self._clients)),
+            return_exceptions=True,
+        )
 
     async def _broadcast(self, payload: dict) -> None:
         self._latest = payload

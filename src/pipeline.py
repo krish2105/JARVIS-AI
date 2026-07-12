@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,7 @@ from src.brain.agent import JarvisSession, run_turn
 from src.brain.local_llm import LocalLLM
 from src.brain.memory import seed_default_memories
 from src.brain.tools import set_timer_notifier
+from src.core.approvals import approvals
 from src.core.cancellation import CancellationToken
 from src.core.state_machine import IllegalTransition, VoiceState, VoiceStateMachine
 from src.system.config import Config, load_config
@@ -76,18 +78,31 @@ class VoiceConfirm:
     def __init__(self, cfg: Config, recorder: Recorder, emit_state=None):
         self.cfg = cfg
         self.recorder = recorder
-        self.emit_state = emit_state  # (description, tool) -> show approval card in HUD
+        self.emit_state = emit_state  # (description, tool, approval_id) -> show approval card
 
     def __call__(self, description: str, tool_name: str, input_data: dict) -> bool:
+        approval_id = approvals.create()
         prompt = f"I'm about to {description}. Say confirm to proceed."
-        logger.info("CONFIRM tool=%s input=%s prompt=%s", tool_name, input_data, prompt)
+        logger.info("CONFIRM tool=%s input=%s id=%s", tool_name, input_data, approval_id)
         if self.emit_state:
-            self.emit_state(description, tool_name)
+            self.emit_state(description, tool_name, approval_id)
         speak(prompt, voice=self.cfg.voice)
-        audio = self.recorder.record_utterance()
-        heard = transcribe(audio, self.cfg.audio.sample_rate)
-        logger.info("CONFIRM heard=%r", heard)
-        return "confirm" in heard.lower()
+        # Resolve on EITHER a spoken "confirm" or a HUD button click, whichever
+        # comes first. Timeout -> denied (the safe default).
+        threading.Thread(target=self._voice_resolve, args=(approval_id,), daemon=True).start()
+        result = approvals.wait(approval_id, timeout=self.cfg.audio.max_record_seconds + 8)
+        logger.info("CONFIRM id=%s result=%s", approval_id, result)
+        return bool(result)
+
+    def _voice_resolve(self, approval_id: str) -> None:
+        try:
+            audio = self.recorder.record_utterance()
+            heard = transcribe(audio, self.cfg.audio.sample_rate)
+            logger.info("CONFIRM heard=%r", heard)
+            approvals.resolve(approval_id, "confirm" in heard.lower())
+        except Exception:  # noqa: BLE001 - never leave the approval unresolved on error
+            logger.exception("voice confirm failed")
+            approvals.resolve(approval_id, False)
 
 
 def _prewarm(cfg: Config) -> None:
@@ -170,7 +185,9 @@ def run_forever(
     # HUD (awaiting_approval) while it waits for the spoken "confirm".
     confirm_fn = VoiceConfirm(
         cfg, recorder,
-        emit_state=lambda desc, tool: go(VoiceState.AWAITING_APPROVAL, description=desc, tool=tool),
+        emit_state=lambda desc, tool, aid: go(
+            VoiceState.AWAITING_APPROVAL, description=desc, tool=tool, approval_id=aid
+        ),
     )
 
     go(VoiceState.INITIALIZING)

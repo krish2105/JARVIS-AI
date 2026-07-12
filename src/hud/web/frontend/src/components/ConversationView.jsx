@@ -17,9 +17,17 @@ const STATE_LABEL = {
 const ACTIVE = new Set(["listening", "transcribing", "thinking", "executing", "speaking"]);
 
 export default function ConversationView() {
-  const { status, request } = useJarvis();
+  const { status, request, send } = useJarvis();
   const [turns, setTurns] = useState([]);
+  const [decided, setDecided] = useState(null);
   const state = status.state || "idle";
+
+  function decide(approved) {
+    if (status.approval_id) {
+      send({ type: "approval_decision", id: status.approval_id, approved });
+      setDecided(approved ? "Approved" : "Denied");
+    }
+  }
 
   // Refresh recent history whenever a turn finishes (idle) or a reply lands.
   useEffect(() => {
@@ -27,6 +35,11 @@ export default function ConversationView() {
       request("list_transcript", { limit: 8 }).then((r) => setTurns(r.turns || []));
     }
   }, [state, status.reply, request]);
+
+  // Clear the local decision label when a new approval appears.
+  useEffect(() => {
+    setDecided(null);
+  }, [status.approval_id]);
 
   const liveHeard = status.transcript || "";
   const liveReply = status.reply || "";
@@ -68,7 +81,15 @@ export default function ConversationView() {
             </div>
           </div>
           <div className="approve-act">
-            <span className="hintline">Speak “confirm” to approve, or say anything else to cancel.</span>
+            {decided ? (
+              <span className="hintline">{decided} — waiting for Jarvis…</span>
+            ) : (
+              <>
+                <button className="btn deny" onClick={() => decide(false)}>Deny</button>
+                <button className="btn go" onClick={() => decide(true)}>Approve</button>
+                <span className="hintline">or say “confirm” aloud</span>
+              </>
+            )}
           </div>
         </div>
       )}

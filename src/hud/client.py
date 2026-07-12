@@ -41,8 +41,24 @@ class HudStateReporter:
         while True:
             try:
                 async with websockets.connect(self._url) as ws:
-                    while True:
-                        payload = await loop.run_in_executor(None, self._queue.get)
-                        await ws.send(json.dumps(payload))
+                    # Full-duplex: push state out AND receive HUD button decisions.
+                    await asyncio.gather(self._send_loop(ws, loop), self._recv_loop(ws))
             except Exception:
                 await asyncio.sleep(RETRY_SECONDS)
+
+    async def _send_loop(self, ws, loop) -> None:
+        while True:
+            payload = await loop.run_in_executor(None, self._queue.get)
+            await ws.send(json.dumps(payload))
+
+    async def _recv_loop(self, ws) -> None:
+        """Resolve an approval when the user clicks Approve/Deny in the HUD."""
+        from src.core.approvals import approvals
+
+        async for message in ws:
+            try:
+                data = json.loads(message)
+            except (ValueError, TypeError):
+                continue
+            if data.get("type") == "approval_decision":
+                approvals.resolve(data.get("id"), bool(data.get("approved")))
