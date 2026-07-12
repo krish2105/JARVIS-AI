@@ -1,55 +1,23 @@
-# Jarvis configuration. Secrets stay in .env — this file is safe to commit.
-# Note: the Settings panel and onboarding wizard rewrite this file via
-# yaml.safe_dump, which does not preserve comments. If you edit here by hand,
-# a later in-app save will strip these comments (the values are kept).
-
-# Matched against openWakeWord's bundled model names (e.g. "jarvis" matches
-# its pretrained "hey_jarvis" model). No account or key needed — see
-# src/audio/wake_word.py.
 wake_word: jarvis
-
-voice: am_liam # Kokoro voice name. Try af_heart, af_bella, am_adam, bm_george, etc.
-
-# mlx-community model repo ids, run locally via mlx-lm — free, offline,
-# downloaded from Hugging Face on first use and cached thereafter. `local`
-# is the everyday model; `local_heavy` is used for requests that look like
-# multi-step planning (see src/brain/agent.py:select_model).
-#
-# Don't drop `local` below 8B: a 3B model was tested and fabricated an
-# entire fake tool execution (invented script, invented confirmation,
-# invented "success" message) without ever emitting a real tool call. 8B
-# is the smallest size reliable enough to trust with run_shell/write_file.
+voice: am_liam
 model:
   local: mlx-community/Meta-Llama-3.1-8B-Instruct-4bit
   local_heavy: mlx-community/Qwen2.5-14B-Instruct-4bit
-
 audio:
   sample_rate: 16000
-  vad_silence_ms: 700           # how much trailing silence ends a turn
+  vad_silence_ms: 700
   max_record_seconds: 15
-  wake_word_sensitivity: 0.6    # openWakeWord detection threshold, 0-1
-
-# Directories Jarvis's read_file/write_file/run_shell tools are allowed to
-# touch. Never widen this to the whole home directory or root.
+  wake_word_sensitivity: 0.4
 filesystem_allowlist:
-  - "~/Documents"
-  - "~/Desktop"
-  - "." # the project folder itself
-
-# Tools that must ask for explicit spoken/typed confirmation ("confirm")
-# before they execute. These four are mandatory (see
-# src/system/config.py:MANDATORY_CONFIRMATIONS) and are re-added automatically
-# if a settings write tries to drop them.
+- ~/Documents
+- ~/Desktop
+- .
 require_confirmation_for:
-  - delete_file          # deleting a memory file
-  - run_shell_command    # run_shell tool
-  - Write                # write_file tool
-  - browser_action       # any mutating browser action (navigate/click/type/submit/upload)
-
+- delete_file
+- run_shell_command
+- Write
+- browser_action
 hud:
   host: 127.0.0.1
   port: 8765
-
-# First-run onboarding wizard is shown until completed. Left false in the repo
-# template so a fresh setup gets the wizard; the app flips it true on finish.
-onboarded: false
+onboarded: true

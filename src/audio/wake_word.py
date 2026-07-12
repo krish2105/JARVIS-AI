@@ -12,11 +12,14 @@ of mic audio and discards them immediately.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 import sounddevice as sd
 
 from src.system.config import Config
+
+logger = logging.getLogger("jarvis.wake")
 
 SAMPLE_RATE = 16000
 FRAME_LENGTH = 1280  # 80ms at 16kHz, openWakeWord's recommended chunk size
@@ -59,6 +62,8 @@ class WakeWordListener:
             channels=1,
             dtype="int16",
         ) as stream:
+            window_max = 0.0
+            frames = 0
             while True:
                 pcm, _ = stream.read(self.frame_length)
                 pcm = pcm.reshape(-1)
@@ -66,6 +71,21 @@ class WakeWordListener:
                 if self._matched_score(scores) is not None:
                     self._model.reset()
                     return
+                # Diagnostic: periodically log the best wake-word score so we
+                # can tell whether the mic is delivering audio and how close
+                # the user's "Hey Jarvis" gets to the threshold. Only logs when
+                # there's real activity, so idle silence doesn't spam the log.
+                best = max((v for n, v in scores.items() if self.wake_word in n.lower()), default=0.0)
+                window_max = max(window_max, best)
+                frames += 1
+                if frames >= 50:  # ~4s
+                    if window_max > 0.05:
+                        logger.info(
+                            "wake: best hey_jarvis score %.3f (threshold %.2f)",
+                            window_max, self.threshold,
+                        )
+                    window_max = 0.0
+                    frames = 0
                 if on_frame:
                     on_frame()
 

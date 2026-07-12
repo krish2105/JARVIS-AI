@@ -1,22 +1,29 @@
 """On-device text-to-speech via mlx-audio's Kokoro model.
 
-Synthesizes sentence-by-sentence in a background thread while playback of
-already-synthesized sentences proceeds on the main thread, so Jarvis starts
-speaking before the whole reply has finished generating.
+Audio is synthesized in a background thread and played through ONE continuous
+output stream (not a fresh sd.play() per chunk), which is what keeps it smooth:
+firing sd.play() repeatedly for each small chunk overlaps them and produces the
+bursting/garbled noise. Writing sequential blocks to a single OutputStream has
+no gaps and no overlap, and polling `should_stop` between blocks makes it
+interruptible for barge-in.
 """
 
 from __future__ import annotations
 
+import logging
 import queue
 import re
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 import sounddevice as sd
 
+logger = logging.getLogger("jarvis.tts")
+
 MODEL_ID = "mlx-community/Kokoro-82M-bf16"
 SAMPLE_RATE = 24000  # Kokoro's native output rate
+_BLOCK = 2400  # 0.1s of audio per write — barge-in stops within ~100 ms
 
 _model = None
 _model_lock = threading.Lock()
@@ -44,19 +51,15 @@ def speak(
     speed: float = 1.0,
     should_stop: Callable[[], bool] | None = None,
 ) -> bool:
-    """Synthesizes and plays `text` aloud, blocking until playback finishes.
-
-    If `should_stop` is supplied it is polled before each audio chunk (and
-    the currently-playing chunk is checked while it plays); when it returns
-    True, playback stops immediately — this is the TTS side of barge-in.
-    Returns True if it was interrupted, False if it finished normally.
-    """
+    """Synthesize and play `text`, blocking until playback finishes. If
+    `should_stop` fires, playback stops within ~100 ms (barge-in). Returns
+    True if it was interrupted, False if it finished normally."""
     sentences = _split_sentences(text)
     if not sentences:
         return False
 
     model = _get_model()
-    audio_queue: queue.Queue = queue.Queue(maxsize=4)
+    audio_queue: queue.Queue = queue.Queue(maxsize=16)
 
     def produce() -> None:
         try:
@@ -64,7 +67,9 @@ def speak(
                 if should_stop is not None and should_stop():
                     break
                 for chunk in model.generate(text=sentence, voice=voice, speed=speed, lang_code="a"):
-                    audio_queue.put(np.array(chunk.audio, copy=False))
+                    audio_queue.put(np.asarray(chunk.audio, dtype=np.float32).reshape(-1))
+        except Exception:  # noqa: BLE001 - a synth failure must not wedge playback
+            logger.exception("TTS synthesis failed")
         finally:
             audio_queue.put(None)
 
@@ -72,24 +77,29 @@ def speak(
     producer.start()
 
     interrupted = False
-    while True:
-        item = audio_queue.get()
-        if item is None:
-            break
-        if should_stop is not None and should_stop():
-            interrupted = True
-            break
-        sd.play(item, samplerate=SAMPLE_RATE)
-        # Poll for a stop request while this chunk plays, instead of a blocking
-        # sd.wait(), so barge-in stops audio within a poll interval.
-        while sd.get_stream().active:
-            if should_stop is not None and should_stop():
-                sd.stop()
-                interrupted = True
-                break
-            sd.sleep(50)  # ms
-        if interrupted:
-            break
-
-    producer.join()
+    stopped = should_stop or (lambda: False)
+    try:
+        with sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
+            while True:
+                item = audio_queue.get()
+                if item is None:
+                    break
+                for i in range(0, len(item), _BLOCK):
+                    if stopped():
+                        interrupted = True
+                        break
+                    stream.write(item[i : i + _BLOCK])
+                if interrupted:
+                    stream.abort()  # drop buffered audio immediately on barge-in
+                    break
+    except Exception:  # noqa: BLE001 - never let playback crash the turn
+        logger.exception("TTS playback failed")
+    finally:
+        producer.join(timeout=1)
+        # drain any leftover so a dead producer thread can exit
+        try:
+            while audio_queue.get_nowait() is not None:
+                pass
+        except queue.Empty:
+            pass
     return interrupted
