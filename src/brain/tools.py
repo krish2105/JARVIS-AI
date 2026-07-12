@@ -391,24 +391,18 @@ def _send_message(tool_input: dict) -> str:
 
 
 # --- documents / RAG ---
-def _make_search_documents(cfg: Config):
-    def handler(tool_input: dict) -> str:
-        query = str(tool_input.get("query", ""))
-        context, sources = documents.search_documents(cfg, query)
-        if sources:
-            unique = list(dict.fromkeys(sources))
-            _add_card({"type": "docs", "title": "From your files & notes",
-                       "text": "\n".join(f"• {s}" for s in unique)})
-        return context
-
-    return handler
+def _search_documents(tool_input: dict) -> str:
+    query = str(tool_input.get("query", ""))
+    context, sources = documents.search_documents(query)
+    if sources:
+        unique = list(dict.fromkeys(sources))
+        _add_card({"type": "docs", "title": "From your files & notes",
+                   "text": "\n".join(f"• {s}" for s in unique)})
+    return context
 
 
-def _make_reindex_documents(cfg: Config):
-    def handler(_tool_input: dict) -> str:
-        return documents.reindex_documents(cfg)
-
-    return handler
+def _reindex_documents(_tool_input: dict) -> str:
+    return documents.reindex_documents()
 
 
 def build_tools(cfg: Config) -> dict[str, Tool]:
@@ -678,7 +672,7 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
                 "Answer from the returned passages, and cite the source name."
             ),
             parameters={"query": "what to look for, in the user's own words"},
-            handler=_make_search_documents(cfg),
+            handler=_search_documents,
         ),
         "reindex_documents": Tool(
             name="reindex_documents",
@@ -687,7 +681,7 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
                 "just added or changed notes/documents and want them searchable now."
             ),
             parameters={},
-            handler=_make_reindex_documents(cfg),
+            handler=_reindex_documents,
         ),
     }
 

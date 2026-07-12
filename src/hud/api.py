@@ -31,6 +31,11 @@ _EDITABLE_CONFIG_PATHS = {
     "audio.full_duplex",
     "filesystem_allowlist",
     "require_confirmation_for",
+    "rag.folders",
+    "rag.include_notes",
+    "rag.use_embeddings",
+    "rag.max_files",
+    "rag.max_file_kb",
     "onboarded",
 }
 
@@ -109,6 +114,27 @@ def save_config(params: dict) -> dict:
     return {"ok": True, "config": load_config().redacted()}
 
 
+def reindex_documents(_params: dict) -> dict:
+    """Rebuild the RAG index from the Settings panel. Runs in a worker thread
+    (see server._handle_request), so the embedding pass won't block the HUD."""
+    from src.brain.skills import documents
+
+    try:
+        return {"ok": True, "message": documents.reindex_documents()}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+def rag_status(_params: dict) -> dict:
+    from src.brain.skills import documents
+
+    try:
+        idx = documents.get_index()
+        return {"chunks": idx.count()}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 def context_snapshot(_params: dict) -> dict:
     """Live context for the HUD's context bar: what Jarvis is working with
     right now — the active model, how many memories it can draw on, and the
@@ -138,4 +164,6 @@ HANDLERS = {
     "get_config": get_config,
     "save_config": save_config,
     "context_snapshot": context_snapshot,
+    "reindex_documents": reindex_documents,
+    "rag_status": rag_status,
 }

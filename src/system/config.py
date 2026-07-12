@@ -66,6 +66,7 @@ class RagConfig:
     indexing a folder can't run away: only small text files, capped in count."""
     folders: list[str] = field(default_factory=lambda: ["~/Documents"])
     include_notes: bool = True  # also index Apple Notes (via AppleScript)
+    use_embeddings: bool = True  # semantic search (local MiniLM); falls back to BM25 if unavailable
     max_files: int = 800
     max_file_kb: int = 2048
     extensions: list[str] = field(default_factory=lambda: [".md", ".markdown", ".txt", ".text"])
@@ -142,6 +143,7 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
         rag=RagConfig(
             folders=rag_raw.get("folders", ["~/Documents"]),
             include_notes=bool(rag_raw.get("include_notes", True)),
+            use_embeddings=bool(rag_raw.get("use_embeddings", True)),
             max_files=int(rag_raw.get("max_files", 800)),
             max_file_kb=int(rag_raw.get("max_file_kb", 2048)),
             extensions=rag_raw.get("extensions", [".md", ".markdown", ".txt", ".text"]),

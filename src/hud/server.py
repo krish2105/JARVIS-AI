@@ -129,7 +129,10 @@ class HudServer:
             result = {"error": f"unknown action '{action}'"}
         else:
             try:
-                result = handler(payload.get("params", {}) or {})
+                # Run in a thread so a slow handler (e.g. reindexing + embedding
+                # documents) never blocks the event loop and its state broadcasts.
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, handler, payload.get("params", {}) or {})
             except Exception as e:  # noqa: BLE001 - a bad request must not kill the connection
                 result = {"error": str(e)}
         response = {"type": "response", "id": payload.get("id"), "result": result}
