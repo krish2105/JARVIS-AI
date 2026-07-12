@@ -16,6 +16,8 @@ const TOOL_ICON = {
   send_email: "✉",
   read_messages: "💬",
   send_message: "💬",
+  search_documents: "▤",
+  reindex_documents: "⟳",
   memory: "🧠",
   web_search: "🔎",
   run_shell: "›_",

@@ -379,3 +379,6 @@ body.orb-mode, body.orb-mode #root { background: transparent !important; }
 /* mail + messages result cards */
 .rcard.rc-em { --accent: #7aa2ff; }
 .rcard.rc-ms { --accent: #41d69a; }
+
+/* documents (RAG) result card */
+.rcard.rc-dc { --accent: #d8a0ff; }

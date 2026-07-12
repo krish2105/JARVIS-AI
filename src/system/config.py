@@ -61,6 +61,17 @@ class HudConfig:
 
 
 @dataclass
+class RagConfig:
+    """Local retrieval over the user's files and notes. Bounded on purpose so
+    indexing a folder can't run away: only small text files, capped in count."""
+    folders: list[str] = field(default_factory=lambda: ["~/Documents"])
+    include_notes: bool = True  # also index Apple Notes (via AppleScript)
+    max_files: int = 800
+    max_file_kb: int = 2048
+    extensions: list[str] = field(default_factory=lambda: [".md", ".markdown", ".txt", ".text"])
+
+
+@dataclass
 class Config:
     wake_word: str = "jarvis"
     voice: str = "am_liam"
@@ -69,6 +80,7 @@ class Config:
     filesystem_allowlist: list[str] = field(default_factory=list)
     require_confirmation_for: list[str] = field(default_factory=list)
     hud: HudConfig = field(default_factory=HudConfig)
+    rag: RagConfig = field(default_factory=RagConfig)
     onboarded: bool = False  # first-run wizard completed?
 
     # populated from environment, not config.yaml — optional path to a custom
@@ -84,6 +96,7 @@ class Config:
         data["model"] = vars(self.model)
         data["audio"] = vars(self.audio)
         data["hud"] = vars(self.hud)
+        data["rag"] = vars(self.rag)
         return data
 
 
@@ -98,6 +111,7 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
     model_raw = raw.get("model", {}) or {}
     audio_raw = raw.get("audio", {}) or {}
     hud_raw = raw.get("hud", {}) or {}
+    rag_raw = raw.get("rag", {}) or {}
 
     cfg = Config(
         wake_word=os.getenv("JARVIS_WAKE_WORD", raw.get("wake_word", "jarvis")),
@@ -124,6 +138,13 @@ def load_config(config_path: Path = CONFIG_PATH, env_path: Path = ENV_PATH) -> C
         hud=HudConfig(
             host=hud_raw.get("host", "127.0.0.1"),
             port=hud_raw.get("port", 8765),
+        ),
+        rag=RagConfig(
+            folders=rag_raw.get("folders", ["~/Documents"]),
+            include_notes=bool(rag_raw.get("include_notes", True)),
+            max_files=int(rag_raw.get("max_files", 800)),
+            max_file_kb=int(rag_raw.get("max_file_kb", 2048)),
+            extensions=rag_raw.get("extensions", [".md", ".markdown", ".txt", ".text"]),
         ),
         onboarded=bool(raw.get("onboarded", False)),
         wake_word_model_path=os.getenv("JARVIS_WAKE_WORD_MODEL_PATH") or None,

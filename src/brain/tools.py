@@ -25,7 +25,7 @@ from pathlib import Path
 from src.brain.browser_tools import build_browser_tools
 from src.brain.memory import memory_dispatch
 from src.brain.memory_db import MemoryDB
-from src.brain.skills import mail, messages, music, system_control
+from src.brain.skills import documents, mail, messages, music, system_control
 from src.brain.skills.apple import create_event, create_reminder, list_events, list_reminders
 from src.brain.skills.routines import RoutineService
 from src.brain.skills.timers import TimerService
@@ -390,6 +390,27 @@ def _send_message(tool_input: dict) -> str:
     return messages.send_message(str(tool_input.get("to", "")), str(tool_input.get("text", "")))
 
 
+# --- documents / RAG ---
+def _make_search_documents(cfg: Config):
+    def handler(tool_input: dict) -> str:
+        query = str(tool_input.get("query", ""))
+        context, sources = documents.search_documents(cfg, query)
+        if sources:
+            unique = list(dict.fromkeys(sources))
+            _add_card({"type": "docs", "title": "From your files & notes",
+                       "text": "\n".join(f"• {s}" for s in unique)})
+        return context
+
+    return handler
+
+
+def _make_reindex_documents(cfg: Config):
+    def handler(_tool_input: dict) -> str:
+        return documents.reindex_documents(cfg)
+
+    return handler
+
+
 def build_tools(cfg: Config) -> dict[str, Tool]:
     allowlist = cfg.resolved_filesystem_allowlist()
 
@@ -646,6 +667,27 @@ def build_tools(cfg: Config) -> dict[str, Tool]:
             },
             handler=_send_message,
             confirm_key="send_message",
+        ),
+        # --- documents / RAG (Apple Notes + configured folders) ---
+        "search_documents": Tool(
+            name="search_documents",
+            description=(
+                "Search the user's OWN notes and files (Apple Notes plus the folders they've "
+                "configured) and return the most relevant passages. Use this whenever the user "
+                "asks about their notes, documents, or something they wrote down or saved. "
+                "Answer from the returned passages, and cite the source name."
+            ),
+            parameters={"query": "what to look for, in the user's own words"},
+            handler=_make_search_documents(cfg),
+        ),
+        "reindex_documents": Tool(
+            name="reindex_documents",
+            description=(
+                "Rebuild the local search index over the user's notes and files. Use if they "
+                "just added or changed notes/documents and want them searchable now."
+            ),
+            parameters={},
+            handler=_make_reindex_documents(cfg),
         ),
     }
 

@@ -7,6 +7,7 @@ const META = {
   screen: { icon: "▢", accent: "sc" },
   email: { icon: "✉", accent: "em" },
   messages: { icon: "💬", accent: "ms" },
+  docs: { icon: "▤", accent: "dc" },
 };
 
 export default function ResultCard({ card }) {
