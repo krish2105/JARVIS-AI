@@ -3,6 +3,7 @@ import { useJarvis } from "../jarvisClient.jsx";
 import Markdown from "./Markdown.jsx";
 import CopyButton from "./CopyButton.jsx";
 import { ResultCards } from "./ResultCard.jsx";
+import AgentTrace from "./AgentTrace.jsx";
 
 const STATE_LABEL = {
   idle: "IDLE",
@@ -27,14 +28,21 @@ export default function ConversationView() {
   const [decided, setDecided] = useState(null);
   const [levels, setLevels] = useState(() => Array(WAVE_BARS).fill(0));
   const [cards, setCards] = useState([]);
+  const [steps, setSteps] = useState([]);
   const state = status.state || "idle";
 
-  // Keep the current turn's result cards visible until the next turn begins.
+  // Keep the current turn's cards + trace visible until the next turn begins.
   useEffect(() => {
     if (Array.isArray(status.cards) && status.cards.length) setCards(status.cards);
   }, [status.cards]);
   useEffect(() => {
-    if (state === "listening" || state === "wake_detected") setCards([]);
+    if (Array.isArray(status.steps) && status.steps.length) setSteps(status.steps);
+  }, [status.steps]);
+  useEffect(() => {
+    if (state === "listening" || state === "wake_detected") {
+      setCards([]);
+      setSteps([]);
+    }
   }, [state]);
 
   // Feed the live mic level into a scrolling waveform buffer while listening.
@@ -139,6 +147,7 @@ export default function ConversationView() {
         {showLive && (
           <div className="pair live">
             {liveHeard && <div className="msg you">{liveHeard}</div>}
+            <AgentTrace steps={steps} />
             {liveReply && (
               <div className="msg jarvis">
                 <Markdown>{liveReply}</Markdown>

@@ -138,6 +138,9 @@ class JarvisSession:
 INTERRUPTED_REPLY = ""  # a barge-in produces no spoken reply; the new turn takes over
 
 TokenSink = Callable[[str], None]
+# Fired as the agent works so the HUD can show a live trace of tool steps.
+# Each step is {"tool", "input", "status": running|done|denied|error, "result"}.
+StepSink = Callable[[dict], None]
 
 
 def _generate_reply(llm, messages, cancel, on_token):
@@ -173,6 +176,7 @@ def run_turn(
     confirm_fn: ConfirmFn = default_confirm_fn,
     cancel: CancellationToken | None = None,
     on_token: TokenSink | None = None,
+    on_step: StepSink | None = None,
 ) -> str:
     """Sends one user turn through the local tool-calling loop and returns
     Jarvis's final text reply. `session.messages` persists conversation
@@ -224,13 +228,19 @@ def run_turn(
         if cancelled():
             return INTERRUPTED_REPLY
 
+        if on_step is not None:
+            on_step({"tool": call["name"], "input": call["input"], "status": "running", "result": ""})
+
         tool = tools.get(call["name"])
+        status = "done"
         if tool is None:
             result = f"Error: unknown tool '{call['name']}'. Available tools: {list(tools)}"
+            status = "error"
         else:
             allowed, reason = guard.check(tool, call["input"])
             if not allowed:
                 result = f"Denied: {reason}"
+                status = "denied"
             elif cancelled():
                 # Approval may have taken time; bail rather than execute a
                 # now-stale action.
@@ -240,7 +250,11 @@ def run_turn(
                     result = tool.handler(call["input"])
                 except Exception as e:  # noqa: BLE001 - tool failures must not crash the loop
                     result = f"Error running {tool.name}: {e}"
+                    status = "error"
             guard.log(call["name"], call["input"], result)
+
+        if on_step is not None:
+            on_step({"tool": call["name"], "input": call["input"], "status": status, "result": str(result)})
 
         session.messages.append({"role": "user", "content": f"Tool result for {call['name']}:\n{result}"})
 

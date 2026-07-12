@@ -4,6 +4,7 @@ import Markdown from "./Markdown.jsx";
 import CopyButton from "./CopyButton.jsx";
 import { ResultCards } from "./ResultCard.jsx";
 import ContextBar from "./ContextBar.jsx";
+import AgentTrace from "./AgentTrace.jsx";
 
 // Spotlight-style command bar: summon anywhere, type or talk, answer streams
 // inline. Rendered in its own transparent always-on-top window (index.html#command).
@@ -12,6 +13,7 @@ export default function CommandBar() {
   const [q, setQ] = useState("");
   const [reply, setReply] = useState("");
   const [cards, setCards] = useState([]);
+  const [steps, setSteps] = useState([]);
   const [busy, setBusy] = useState(false);
   const [asked, setAsked] = useState("");
   const [attachments, setAttachments] = useState({});
@@ -41,9 +43,11 @@ export default function CommandBar() {
     setAsked(text);
     setReply("");
     setCards([]);
+    setSteps([]);
     setBusy(true);
     sendCommand(text, (chunk) => {
       setReply(chunk.reply || "");
+      if (Array.isArray(chunk.steps)) setSteps(chunk.steps);
       if (chunk.done) {
         if (Array.isArray(chunk.cards)) setCards(chunk.cards);
         setBusy(false);
@@ -65,6 +69,7 @@ export default function CommandBar() {
       if (reply || busy) {
         setReply("");
         setCards([]);
+        setSteps([]);
         setBusy(false);
         setQ("");
         setAsked("");
@@ -94,8 +99,9 @@ export default function CommandBar() {
       <ContextBar attachments={attachments} onToggle={toggle} />
       {(reply || busy) && (
         <div className="cmd-result">
-          {reply ? <Markdown>{reply}</Markdown> : "Thinking…"}
-          {busy && <span className="cmd-caret" />}
+          <AgentTrace steps={steps} />
+          {reply ? <Markdown>{reply}</Markdown> : !steps.length && "Thinking…"}
+          {busy && reply && <span className="cmd-caret" />}
           <ResultCards cards={cards} />
           {!busy && reply && (
             <div className="cmd-act">

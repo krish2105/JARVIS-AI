@@ -61,6 +61,21 @@ def _run_turn(*args, **kwargs):
     return _llm_pool.submit(run_turn, *args, **kwargs).result()
 
 
+def _apply_step(steps: list[dict], step: dict, limit: int = 220) -> None:
+    """Fold an agent step event into the running trace list (mutated in place).
+    'running' appends a pending step; a terminal status resolves the matching
+    pending step with a truncated, display-friendly result."""
+    if step["status"] == "running":
+        steps.append({"tool": step["tool"], "input": step.get("input") or {}, "status": "running", "result": ""})
+        return
+    for s in reversed(steps):
+        if s["tool"] == step["tool"] and s["status"] == "running":
+            result = str(step.get("result", ""))
+            s["status"] = step["status"]
+            s["result"] = result if len(result) <= limit else result[:limit] + "…"
+            return
+
+
 def _configure_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -219,15 +234,24 @@ def run_forever(
                 })
                 return
 
+            steps: list[dict] = []
+
             def on_tok(tok: str) -> None:
                 acc["t"] += tok
-                reporter.send_message({"type": "command_stream", "id": cmd_id, "reply": acc["t"], "done": False})
+                reporter.send_message({"type": "command_stream", "id": cmd_id,
+                                       "reply": acc["t"], "steps": steps, "done": False})
+
+            def on_step(step: dict) -> None:
+                _apply_step(steps, step)
+                reporter.send_message({"type": "command_stream", "id": cmd_id,
+                                       "reply": acc["t"], "steps": steps, "done": False})
 
             # Typed queries auto-deny confirmations (no spoken confirm loop);
             # Q&A and safe tools still work.
-            reply = _run_turn(text, JarvisSession(), cfg, confirm_fn=lambda *a: False, on_token=on_tok)
-            reporter.send_message({"type": "command_stream", "id": cmd_id,
-                                   "reply": reply or "(no answer)", "cards": pop_cards(), "done": True})
+            reply = _run_turn(text, JarvisSession(), cfg, confirm_fn=lambda *a: False,
+                              on_token=on_tok, on_step=on_step)
+            reporter.send_message({"type": "command_stream", "id": cmd_id, "reply": reply or "(no answer)",
+                                   "cards": pop_cards(), "steps": steps, "done": True})
         except Exception:  # noqa: BLE001
             logger.exception("command failed")
             reporter.send_message({"type": "command_stream", "id": cmd_id,
@@ -295,6 +319,18 @@ def run_forever(
 
         return on_token
 
+    def make_on_step(transcript: str):
+        """Stream the agent's tool trace to the HUD as it works, so you can
+        watch the steps live during THINKING/EXECUTING (before the answer)."""
+        steps: list[dict] = []
+
+        def on_step(step: dict) -> None:
+            _apply_step(steps, step)
+            if state_callback:
+                state_callback("executing", {"transcript": transcript, "steps": list(steps)})
+
+        return on_step
+
     # Created after `go` so a confirmation can surface an approval card in the
     # HUD (awaiting_approval) while it waits for the spoken "confirm".
     confirm_fn = VoiceConfirm(
@@ -343,6 +379,7 @@ def run_forever(
                     reply = _run_turn(
                         transcript, session, cfg, confirm_fn=confirm_fn,
                         cancel=cancel, on_token=make_on_token(speaker, transcript),
+                        on_step=make_on_step(transcript),
                     )
                     if reply and not speaker.spoken and not cancel.cancelled:
                         go(VoiceState.SPEAKING, transcript=transcript, reply=reply)
@@ -358,6 +395,7 @@ def run_forever(
                     reply = _run_turn(
                         transcript, session, cfg, confirm_fn=confirm_fn,
                         cancel=cancel, on_token=make_on_token(speaker, transcript, on_first=barge.stop),
+                        on_step=make_on_step(transcript),
                     )
                     speaker.finish()
                     barge.stop()  # idempotent — already stopped when speaking began
